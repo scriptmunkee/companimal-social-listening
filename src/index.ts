@@ -70,6 +70,7 @@ async function runPending(env: Env) {
       return { ...s, note: r.note };
     }),
     reddit_now: () => runJob(env, "reddit_post", () => postRedditTasks(env, "full")),
+    reddit_themes_now: () => runJob(env, "reddit_themes", () => buildRedditThemes(env)),
   };
   for (const name of Object.keys(jobs)) {
     const r = await env.DB.prepare(`DELETE FROM pending_jobs WHERE job=?1`).bind(name).run();

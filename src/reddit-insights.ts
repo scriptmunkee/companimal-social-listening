@@ -13,6 +13,7 @@ function insightPrompt(batch: any[]) {
   const topics = TOPICS.map((t) => t.id).join(", ");
   return `You read Reddit threads about dogs to inform content strategy for Companimal, a UK puppy marketplace for buyers, breeders, rescues and rehomers.
 You only have each thread's title, Google's snippet of the post and its comment count. Judge what the conversation is about.
+Write in UK English (behaviour, socialisation, colour) even when the poster uses US spelling.
 For each thread return an object:
 - id: the given id
 - kind: one of ${KINDS.join(", ")}. "irrelevant" for anything not genuinely about dogs or dog ownership (memes, megathread boilerplate, off-topic).
@@ -20,7 +21,7 @@ For each thread return an object:
 - pain_point: the underlying problem or worry in one short sentence, or null
 - need: what the poster wants (reassurance, step-by-step help, a recommendation, validation, to share joy...), a few words
 - emotion: one of ${EMOTIONS.join(", ")}
-- content_angle: one article title Companimal could publish that would genuinely help people like this poster, UK English, keyword before any colon, or null if none fits
+- content_angle: one article title Companimal could publish that answers THIS poster's exact situation, specific not generic (bad: "Pet insurance: what to expect"; good: "Pet insurance claim rejected: how to appeal and what insurers check"). Sentence case, UK English, keyword phrase first. Never "tips and tricks" or "what you need to know". null if nothing genuinely fits
 - lens: buyer, breeder, rescue or owner
 - topic: one of [${topics}]
 - region: "uk" only with clear UK signals (£, UK places, UK spelling and terms), "non_uk" with clear non-UK signals ($, US states, "shots"), else "unknown"
@@ -86,20 +87,29 @@ export async function buildRedditThemes(env: Env) {
     FROM reddit_threads t JOIN reddit_insights i ON i.post_id=t.post_id
     WHERE t.project=?1 AND t.last_seen >= ?2 AND i.kind NOT IN ('irrelevant') AND COALESCE(i.region,'unknown') <> 'non_uk'`).bind(PROJECT.id, daysAgo(7)).all<any>()).results || [];
   if (rows.length < 5) return { added: 0, seen: rows.length, note: "not enough threads yet" };
-  const ranked = rows.map((r: any) => ({ ...r, score: threadScore(r) })).sort((a: any, b: any) => b.score - a.score).slice(0, 120);
+  const ranked = rows.map((r: any) => ({ ...r, score: threadScore(r) })).sort((a: any, b: any) => b.score - a.score).slice(0, 220);
   let themes: any[] = [];
   let model = "rules";
   if (env.AI && env.MOCK !== "1") {
-    const prompt = `These are this week's most active Reddit dog threads (UK and unknown-location), with an AI theme label per thread.
-Group them into 6 to 12 conversation themes that a content strategist for Companimal (UK puppy marketplace: buyers, breeders, rescues, rehomers) should know about.
-For each theme return: {"theme": short label, "summary": 1 to 2 sentences on what people are saying, "why": why it matters for Companimal's content, "ideas": [2 article titles, UK English, keyword before any colon], "sentiment": "positive" | "mixed" | "negative", "thread_ids": [ids of threads in this theme]}.
-Order themes by how much conversation they carry (comments and thread count). Return ONLY a JSON array.
+    const prompt = `You are a content strategist for Companimal, a UK puppy marketplace for buyers, breeders, rescues and rehomers.
+Below are this week's Reddit dog threads (title, comment count, and an AI reading of each thread's specific theme and pain point).
 
-id | subreddit | comments | theme | pain point | title
+Group them into 8 to 14 SPECIFIC conversation themes. Rules:
+- A theme is a specific situation or problem people keep raising, NOT a category. Good: "Fear of their own dog after a bite", "Leash pulling in adolescent dogs", "Vet bills people on low incomes can't afford", "Puppy blues and regret in week one", "Spotting a breeder deposit scam". Bad: "Dog training", "Puppy care", "Dog health", "Rescue and rehoming", "Dog ownership".
+- Build themes from the per-thread theme and pain point labels; merge near-duplicates into one theme. Every theme needs at least 2 threads.
+- summary: 1 to 2 sentences on what people are actually saying, with concrete specifics from the threads (ages, breeds, situations, numbers).
+- why: one sentence on why it matters for Companimal's audience (buyers, breeders, rescues, new owners).
+- ideas: 2 article titles that answer the exact pain point, specific not generic. Never use "tips and tricks", "what you need to know" or "everything you need to know". Keyword phrase first, then a colon if needed.
+- UK English spelling (behaviour, socialisation, colour, programme) and sentence case for theme labels and titles.
+- sentiment: "positive", "mixed" or "negative".
+- thread_ids: the ids of every thread in the theme.
+Order themes by total comments then thread count. Return ONLY a JSON array of {"theme","summary","why","ideas","sentiment","thread_ids"}.
+
+id | subreddit | comments | thread theme | pain point | title
 ${ranked.map((r: any) => `${r.post_id} | r/${r.subreddit} | ${r.posts_count ?? "?"} | ${r.theme || ""} | ${(r.pain_point || "").slice(0, 90)} | ${(r.title || "").slice(0, 110)}`).join("\n")}`;
     try {
-      const [arr, used] = await runAi(env, prompt, 3500, 0.2);
-      themes = arr.filter((t) => t && typeof t.theme === "string" && Array.isArray(t.thread_ids));
+      const [arr, used] = await runAi(env, prompt, 4000, 0.1);
+      themes = arr.filter((t) => t && typeof t.theme === "string" && Array.isArray(t.thread_ids) && t.thread_ids.length >= 2);
       if (themes.length) model = used;
     } catch (e) { console.error("reddit themes failed", String((e as any)?.message || e)); }
   }

@@ -88,6 +88,10 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0011_insight_attempts",
     sql: [`ALTER TABLE reddit_threads ADD COLUMN insight_attempts INTEGER DEFAULT 0`],
   },
+  {
+    name: "0012_rebuild_themes",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('reddit_themes_now', datetime('now'))`],
+  },
 ];
 
 let checked = false;
