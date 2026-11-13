@@ -10,7 +10,7 @@
 
 import {
   PROJECT, SUBREDDITS, SUBREDDIT_DEPTH, REDDIT_FACETS, REDDIT_FACETS_PER_DAY,
-  REDDIT_TOPIC_QUERIES, REDDIT_TOPIC_PER_DAY, REDDIT_SNOWBALL_PER_DAY,
+  REDDIT_TOPIC_QUERIES, REDDIT_TOPIC_PER_DAY, REDDIT_SNOWBALL_PER_DAY, REDDIT_TRACKED_PER_DAY,
 } from "../../config/taxonomy";
 import { Env, Item, nowIso, today, dayOfYear, clean, daysAgo } from "../lib";
 
@@ -124,7 +124,11 @@ export async function postRedditTasks(env: Env, mode: "daily" | "full" = "daily"
   // Topic searches for Discussions and forums (comment counts), plus harvested questions
   const topics = mode === "full" ? REDDIT_TOPIC_QUERIES : rotate(REDDIT_TOPIC_QUERIES, REDDIT_TOPIC_PER_DAY);
   const snowball = await snowballQueries(env, REDDIT_SNOWBALL_PER_DAY);
-  const topicSet = [...new Set([...topics, ...snowball])];
+  // Searches that surfaced threads with comment counts recently: re-run daily to measure growth
+  const tracked = ((await env.DB.prepare(`SELECT query, MAX(posts_count) AS c FROM reddit_thread_hits
+    WHERE via='discussions' AND seen_date >= ?1 AND query NOT LIKE 'site:%' GROUP BY query ORDER BY c DESC LIMIT ?2`)
+    .bind(daysAgo(14), REDDIT_TRACKED_PER_DAY).all<any>()).results || []).map((r: any) => String(r.query));
+  const topicSet = [...new Set([...topics, ...tracked, ...snowball])];
   for (const q of topicSet) tasks.push({ ...base, keyword: q, depth: 10, tag: `csl|${PROJECT.id}|reddit_topic|${q}` });
 
   const mark = topicSet.map((q) => env.DB.prepare(`INSERT INTO reddit_queries (query, source, last_run, runs) VALUES (?1, ?2, ?3, 1)
@@ -158,7 +162,7 @@ export async function postRedditTasks(env: Env, mode: "daily" | "full" = "daily"
     }
     for (let j = 0; j < ins.length; j += 60) await env.DB.batch(ins.slice(j, j + 60));
   }
-  return { added: 0, seen: 0, cost, note: `posted ${posted} Reddit searches (${snowball.length} harvested questions)` };
+  return { added: 0, seen: 0, cost, note: `posted ${posted} Reddit searches (${tracked.length} tracked, ${snowball.length} harvested questions)` };
 }
 
 /**

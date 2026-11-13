@@ -122,8 +122,11 @@ export const REDDIT_TOPIC_QUERIES: string[] = [
   // UK specifics
   "dog friendly uk", "xl bully ban", "dog theft uk", "dog walker cost uk", "doggy daycare worth it",
 ];
-export const REDDIT_TOPIC_PER_DAY = 20;     // rotate through the bank
-export const REDDIT_SNOWBALL_PER_DAY = 10;  // plus fresh questions harvested from Reddit itself
+// Google shows the Discussions block (with comment counts) on roughly a third of searches,
+// about two Reddit threads each time, so breadth and daily repetition is what builds coverage.
+export const REDDIT_TOPIC_PER_DAY = 1000;   // the whole bank, every day (~$0.0006 each)
+export const REDDIT_SNOWBALL_PER_DAY = 30;  // plus fresh questions harvested from Reddit itself
+export const REDDIT_TRACKED_PER_DAY = 40;   // plus re-running searches that recently surfaced commented threads
 export const REDDIT_INSIGHTS_PER_RUN = 96;  // threads analysed per 10-minute run
 
 export const SERP_PAA_QUERIES: string[] = [
