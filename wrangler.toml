@@ -22,8 +22,13 @@ bucket_name = "companimal-social-listening-archive"
 [ai]
 binding = "AI"
 
+# Health alerts are emailed from alerts@companimal.co.uk (Email Routing) to the
+# ALERT_EMAIL secret, which must be a verified Email Routing destination.
+[[send_email]]
+name = "ALERTS"
+
 [observability]
 enabled = true
 
 # Secrets (set with `wrangler secret put`):
-# DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD, YOUTUBE_API_KEY, DASHBOARD_PASSWORD, HASH_SALT
+# DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD, YOUTUBE_API_KEY, DASHBOARD_PASSWORD, HASH_SALT, ALERT_EMAIL

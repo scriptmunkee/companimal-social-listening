@@ -1,7 +1,34 @@
-import { TOPICS, PROJECT } from "../config/taxonomy";
+import { TOPICS, PROJECT, UK_SIGNALS, NON_UK_SIGNALS, UK_FORUM_DOMAINS } from "../config/taxonomy";
 import { Env, nowIso, clean } from "./lib";
 
 export const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+// Used if the main model is retired or failing
+export const AI_FALLBACK_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+const REGIONS = ["uk", "non_uk", "unknown"];
+
+/** Run a prompt on the main model, falling back to the backup model. Returns [text, modelUsed]. */
+export async function runAi(env: Env, prompt: string, maxTokens: number, temperature = 0): Promise<[string, string]> {
+  let lastErr: unknown;
+  for (const model of [AI_MODEL, AI_FALLBACK_MODEL]) {
+    try {
+      const out: any = await env.AI!.run(model as any, { messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature } as any);
+      return [String(out?.response ?? ""), model];
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+/** Rules-based region guess from text, source and community. */
+export function regionOf(text: string, url: string | null, community: string | null, query: string | null): string {
+  const t = ` ${text.toLowerCase()} `;
+  const uk = UK_SIGNALS.filter((k) => t.includes(k)).length;
+  const non = NON_UK_SIGNALS.filter((k) => t.includes(k)).length;
+  const host = (() => { try { return url ? new URL(url).hostname : ""; } catch { return ""; } })();
+  const ukSource = host.endsWith(".uk") || UK_FORUM_DOMAINS.some((d) => host.endsWith(d)) || /r\/(askuk|casualuk|unitedkingdom|uk)/i.test(`${community} ${url}`) || (query || "").startsWith("uk-channel:");
+  if (non > uk && non >= 1) return "non_uk";
+  if (uk > non || ukSource) return "uk";
+  return "unknown";
+}
 const KINDS = ["question", "problem", "recommendation", "myth", "story", "opinion", "other"];
 const STOP = new Set("a an the and or but if of to in on for with is are was were be been it this that my your i we you our at as by from how what why when which who do does did can could should would will just so me im i'm uk".split(" "));
 
@@ -50,6 +77,7 @@ For each post return an object with:
 - topic: one of [${topicList}]
 - lens: buyer, breeder, rescue or owner (who is speaking or who the question is for)
 - sentiment: positive, negative or neutral
+- region: "uk" if the poster is clearly in the UK (£, UK places, NHS, councils, Kennel Club, RSPCA, Dogs Trust, UK spelling and phrasing like "jabs"), "non_uk" if clearly elsewhere ($, US states, "shots", AKC, ASPCA, US spelling), otherwise "unknown"
 "myth" means the post repeats a belief that may be untrue. "story" means a first-hand experience.
 Return ONLY a JSON array, no prose.
 
@@ -80,7 +108,7 @@ async function urlMatch(env: Env, q: string): Promise<{ url: string | null; scor
 
 /** Enrich up to `limit` unenriched items. Runs hourly. */
 export async function enrichItems(env: Env, limit = 200) {
-  const rows = await env.DB.prepare(`SELECT id, source, COALESCE(title,'') AS title, COALESCE(text,'') AS text FROM items WHERE enriched=0 AND project=?1 ORDER BY collected_at LIMIT ?2`).bind(PROJECT.id, limit).all<any>();
+  const rows = await env.DB.prepare(`SELECT id, source, url, community, query, COALESCE(title,'') AS title, COALESCE(text,'') AS text FROM items WHERE enriched=0 AND project=?1 ORDER BY collected_at LIMIT ?2`).bind(PROJECT.id, limit).all<any>();
   const items = rows.results || [];
   if (!items.length) return { added: 0, seen: 0, note: "nothing to enrich" };
 
@@ -91,9 +119,9 @@ export async function enrichItems(env: Env, limit = 200) {
     for (let i = 0; i < forAi.length; i += 15) {
       const batch = forAi.slice(i, i + 15);
       try {
-        const out: any = await env.AI.run(AI_MODEL as any, { messages: [{ role: "user", content: buildPrompt(batch) }], max_tokens: 2500, temperature: 0 } as any);
-        for (const r of parseJsonArray(out?.response ?? String(out))) {
-          if (r?.id && KINDS.includes(r.kind)) { results.set(r.id, r); aiUsed++; }
+        const [text, model] = await runAi(env, buildPrompt(batch), 3000);
+        for (const r of parseJsonArray(text)) {
+          if (r?.id && KINDS.includes(r.kind)) { results.set(r.id, { ...r, model }); aiUsed++; }
         }
       } catch (e) {
         console.error("AI batch failed", e);
@@ -112,13 +140,17 @@ export async function enrichItems(env: Env, limit = 200) {
       lens: ["buyer", "breeder", "rescue", "owner"].includes(ai.lens) ? ai.lens : h.lens,
       question: ai.question ? clean(ai.question, 240) : null,
       sentiment: ["positive", "negative", "neutral"].includes(ai.sentiment) ? ai.sentiment : "neutral",
-      model: AI_MODEL,
+      model: ai.model || AI_MODEL,
     } : { ...h, model: "heuristic" };
+    // Region: rules first (hard signals), AI decides the rest
+    const ruleRegion = regionOf(`${it.title} ${it.text}`, it.url, it.community, it.query);
+    const aiRegion = ai && REGIONS.includes(ai.region) ? ai.region : "unknown";
+    const region = ruleRegion !== "unknown" ? ruleRegion : aiRegion;
     // PAA titles are questions by definition
     if (it.source === "serp_paa") { e.kind = "question"; e.question = clean(it.title, 240); }
     const m = e.question || e.kind !== "other" ? await urlMatch(env, `${e.question || it.title}`) : { url: null, score: 0 };
-    stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO enrichments (item_id, kind, question, topic, lens, sentiment, matched_url, match_score, model, enriched_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`)
-      .bind(it.id, e.kind, e.question, e.topic, e.lens, e.sentiment, m.url, m.score, e.model, nowIso()));
+    stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO enrichments (item_id, kind, question, topic, lens, sentiment, matched_url, match_score, model, enriched_at, region) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`)
+      .bind(it.id, e.kind, e.question, e.topic, e.lens, e.sentiment, m.url, m.score, e.model, nowIso(), region));
     stmts.push(env.DB.prepare(`UPDATE items SET enriched=1 WHERE id=?1`).bind(it.id));
   }
   for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));

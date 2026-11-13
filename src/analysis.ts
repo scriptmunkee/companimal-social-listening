@@ -1,25 +1,29 @@
 import { PROJECT, TOPICS } from "../config/taxonomy";
 import { Env, nowIso, today, daysAgo } from "./lib";
-import { AI_MODEL } from "./enrich";
+import { runAi } from "./enrich";
 
 /** Rebuild daily topic counts for the last few days (cheap, idempotent). */
 export async function rollup(env: Env, days = 3) {
   const from = daysAgo(days);
-  await env.DB.prepare(`DELETE FROM daily_topic_counts WHERE project=?1 AND date>=?2`).bind(PROJECT.id, from).run();
+  await env.DB.prepare(`DELETE FROM daily_counts WHERE project=?1 AND date>=?2`).bind(PROJECT.id, from).run();
   const r = await env.DB.prepare(`
-    INSERT INTO daily_topic_counts (project, date, topic, lens, kind, n, engagement)
-    SELECT i.project, i.collected_date, e.topic, e.lens, e.kind, COUNT(*), COALESCE(SUM(i.engagement),0)
+    INSERT INTO daily_counts (project, date, topic, lens, kind, region, n, engagement)
+    SELECT i.project, i.collected_date, e.topic, e.lens, e.kind, COALESCE(e.region,'unknown'), COUNT(*), COALESCE(SUM(i.engagement),0)
     FROM items i JOIN enrichments e ON e.item_id=i.id
     WHERE i.project=?1 AND i.collected_date>=?2
-    GROUP BY i.project, i.collected_date, e.topic, e.lens, e.kind`).bind(PROJECT.id, from).run();
+    GROUP BY i.project, i.collected_date, e.topic, e.lens, e.kind, COALESCE(e.region,'unknown')`).bind(PROJECT.id, from).run();
   return { added: r.meta?.changes ?? 0, seen: 0 };
 }
+
+/** Region filter: "uk" (default) keeps UK and unknown, "all" keeps everything. */
+export type RegionFilter = "uk" | "all";
+export const regionSql = (col: string, region: RegionFilter = "uk") => (region === "all" ? "" : ` AND COALESCE(${col},'unknown') <> 'non_uk'`);
 
 export interface RisingTopic { topic: string; label: string; last7: number; prior28: number; ratio: number; spark: number[]; baselineReady: boolean }
 
 /** Topics growing faster than their own 4-week baseline. */
-export async function risingTopics(env: Env, lens?: string): Promise<RisingTopic[]> {
-  const rows = await env.DB.prepare(`SELECT date, topic, SUM(n) AS n FROM daily_topic_counts WHERE project=?1 AND date>=?2 ${lens ? "AND lens=?3" : ""} GROUP BY date, topic`)
+export async function risingTopics(env: Env, lens?: string, region: RegionFilter = "uk"): Promise<RisingTopic[]> {
+  const rows = await env.DB.prepare(`SELECT date, topic, SUM(n) AS n FROM daily_counts WHERE project=?1 AND date>=?2 ${lens ? "AND lens=?3" : ""}${regionSql("region", region)} GROUP BY date, topic`)
     .bind(...[PROJECT.id, daysAgo(35), ...(lens ? [lens] : [])]).all<any>();
   const byTopic = new Map<string, Map<string, number>>();
   for (const r of rows.results || []) {
@@ -27,7 +31,7 @@ export async function risingTopics(env: Env, lens?: string): Promise<RisingTopic
     byTopic.get(r.topic)!.set(r.date, r.n);
   }
   const cut = daysAgo(7);
-  const first = await env.DB.prepare(`SELECT MIN(date) AS d FROM daily_topic_counts WHERE project=?1`).bind(PROJECT.id).first<any>();
+  const first = await env.DB.prepare(`SELECT MIN(date) AS d FROM daily_counts WHERE project=?1`).bind(PROJECT.id).first<any>();
   // Growth ratios mean nothing until there are ~3 weeks of history
   const baselineReady = !!first?.d && first.d <= daysAgo(21);
   const out: RisingTopic[] = [];
@@ -50,13 +54,13 @@ export function normQ(q: string) {
 export interface Opportunity { topic: string; question: string; count: number; engagement: number; sources: string; covered: string | null; score: number; example_url: string | null }
 
 /** Questions grouped and scored: frequency, engagement, growth and whether we already cover it. */
-export async function opportunities(env: Env, days = 30, lens?: string, limit = 50): Promise<Opportunity[]> {
+export async function opportunities(env: Env, days = 30, lens?: string, limit = 50, region: RegionFilter = "uk"): Promise<Opportunity[]> {
   const rows = await env.DB.prepare(`
     SELECT e.question, e.topic, e.matched_url, e.match_score, i.engagement, i.source, i.url, i.collected_date
     FROM enrichments e JOIN items i ON i.id=e.item_id
-    WHERE i.project=?1 AND e.question IS NOT NULL AND i.collected_date>=?2 ${lens ? "AND e.lens=?3" : ""}`)
+    WHERE i.project=?1 AND e.question IS NOT NULL AND i.collected_date>=?2 ${lens ? "AND e.lens=?3" : ""}${regionSql("e.region", region)}`)
     .bind(...[PROJECT.id, daysAgo(days), ...(lens ? [lens] : [])]).all<any>();
-  const rising = new Map((await risingTopics(env, lens)).map((r) => [r.topic, r.ratio]));
+  const rising = new Map((await risingTopics(env, lens, region)).map((r) => [r.topic, r.ratio]));
   const groups = new Map<string, any>();
   for (const r of rows.results || []) {
     const k = `${r.topic}|${normQ(r.question)}`;
@@ -79,20 +83,20 @@ export async function opportunities(env: Env, days = 30, lens?: string, limit = 
 export async function buildBrief(env: Env) {
   const opps = (await opportunities(env, 14, undefined, 25)).filter((o) => !o.covered);
   const rising = (await risingTopics(env)).slice(0, 5);
-  const myths = await env.DB.prepare(`SELECT e.topic, COALESCE(e.question, i.title) AS claim, i.url FROM enrichments e JOIN items i ON i.id=e.item_id WHERE i.project=?1 AND e.kind='myth' AND i.collected_date>=?2 ORDER BY i.engagement DESC LIMIT 5`).bind(PROJECT.id, daysAgo(14)).all<any>();
+  const myths = await env.DB.prepare(`SELECT e.topic, COALESCE(e.question, i.title) AS claim, i.url FROM enrichments e JOIN items i ON i.id=e.item_id WHERE i.project=?1 AND e.kind='myth' AND i.collected_date>=?2${regionSql("e.region")} ORDER BY i.engagement DESC LIMIT 5`).bind(PROJECT.id, daysAgo(14)).all<any>();
   let ideas: any[] = [];
   let model = "rules";
   if (env.AI && env.MOCK !== "1" && opps.length) {
     try {
-      const prompt = `You plan content for Companimal, a UK puppy marketplace (buyers, breeders, rescues). From these audience questions, propose 5 article ideas.
+      const prompt = `You plan content for Companimal, a UK puppy marketplace (buyers, breeders, rescues). Use UK English and UK context only. From these UK audience questions, propose 5 article ideas.
 Each idea: {"title": article title with the keyword before any colon, "topic": topic id, "why": one sentence on the audience signal, "questions": up to 4 of the listed questions it should answer as H2s}.
 Return ONLY a JSON array.
 Questions (topic | question | mentions | engagement):
 ${opps.slice(0, 20).map((o) => `${o.topic} | ${o.question} | ${o.count} | ${o.engagement}`).join("\n")}
 Rising topics: ${rising.map((r) => `${r.label} (x${r.ratio.toFixed(1)})`).join(", ")}`;
-      const out: any = await env.AI.run(AI_MODEL as any, { messages: [{ role: "user", content: prompt }], max_tokens: 1500, temperature: 0.2 } as any);
-      const m = String(out?.response ?? "").match(/\[[\s\S]*\]/);
-      if (m) { ideas = JSON.parse(m[0]); model = AI_MODEL; }
+      const [text, used] = await runAi(env, prompt, 1500, 0.2);
+      const m = text.match(/\[[\s\S]*\]/);
+      if (m) { ideas = JSON.parse(m[0]); model = used; }
     } catch (e) { console.error("brief AI failed", e); }
   }
   if (!ideas.length) {

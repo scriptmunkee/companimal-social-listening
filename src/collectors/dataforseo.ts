@@ -1,9 +1,9 @@
-import { PROJECT, SERP_FORUM_QUERIES, SERP_FORUM_PER_DAY, SERP_PAA_QUERIES, CONTENT_ANALYSIS_KEYWORDS, CONTENT_ANALYSIS_LIMIT } from "../../config/taxonomy";
+import { PROJECT, SERP_FORUM_QUERIES, SERP_FORUM_PER_DAY, SERP_PAA_QUERIES, CONTENT_ANALYSIS_KEYWORDS, CONTENT_ANALYSIS_LIMIT, UK_FORUM_DOMAINS } from "../../config/taxonomy";
 import { Env, Item, archiveRaw, saveItems, nowIso, clean, dayOfYear } from "../lib";
 import { mockSerp, mockContentAnalysis } from "../mock";
 
 const API = "https://api.dataforseo.com/v3";
-const FORUM_DOMAINS = ["reddit.com", "mumsnet.com", "quora.com", "dogforum", "forum", "boards.", "community.", "netmums.com", "pistonheads.com"];
+const FORUM_DOMAINS = ["reddit.com", "quora.com", "dogforum", "forum", "boards.", "community.", ...UK_FORUM_DOMAINS];
 
 function auth(env: Env) {
   if (!env.DATAFORSEO_LOGIN || !env.DATAFORSEO_PASSWORD) throw new Error("DataForSEO credentials not set");
@@ -117,7 +117,8 @@ export async function collectContentAnalysis(env: Env) {
       keyword: kw,
       page_type: ["blogs", "message-boards", "news"],
       search_mode: "as_is",
-      filters: [["language", "=", "en"]],
+      // UK only: .uk sites or known UK forums, English
+      filters: [[["main_domain", "like", "%.uk"], "or", ["main_domain", "in", UK_FORUM_DOMAINS]], "and", ["language", "=", "en"]],
       order_by: ["content_info.date_published,desc"],
       limit: CONTENT_ANALYSIS_LIMIT,
     }]);

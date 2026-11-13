@@ -9,6 +9,8 @@ export interface Env {
   YOUTUBE_API_KEY?: string;
   DASHBOARD_PASSWORD?: string;
   HASH_SALT?: string;
+  ALERTS?: SendEmail;
+  ALERT_EMAIL?: string; // must be a verified Email Routing destination
   MOCK?: string; // "1" = generate fixture data instead of calling APIs (local testing)
 }
 

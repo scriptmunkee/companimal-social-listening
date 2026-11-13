@@ -17,6 +17,22 @@ Storage:
 - **R2** `raw/companimal/{source}/{yyyy}/{mm}/{dd}/…json`: every raw API response, never edited. Expires after 730 days (personal data minimisation).
 - **D1**: normalised posts (usernames hashed), enrichments, daily topic counts (kept forever), coverage log, query versions, briefs, pipeline queue.
 
+## Deploys are automatic
+
+The repo is connected to Cloudflare Workers Builds: every push to `main` deploys. Database changes live in `src/migrations.ts` and the Worker applies them itself on its next request or cron run, so no manual migration step is needed.
+
+## UK focus
+
+- Every post is tagged `uk`, `non_uk` or `unknown` (keyword rules for hard signals such as £, councils, RSPCA, US states and $, then the AI for the rest).
+- The dashboard defaults to **UK only** (UK plus unsure); **All regions** shows everything. Non-UK posts stay in the archive.
+- Google searches run on UK Google and include UK communities (Mumsnet, Netmums, Champdogs, r/AskUK, r/CasualUK).
+- Web mentions are limited to `.uk` sites and known UK forums.
+- YouTube reads recent uploads from named UK channels (`YOUTUBE_UK_CHANNELS` in `config/taxonomy.ts`); channel lookups are cached and listed on the Sources page.
+
+## Health alerts
+
+Every morning a health check looks at the last 26 hours. If any job failed, didn't run, collected nothing, or the AI stopped responding (it falls back to a second model first), it emails `ALERT_EMAIL` from `alerts@companimal.co.uk` and shows a banner on the Today page. Silent when healthy. `GET /api/health` returns the current issues.
+
 ## Dashboard
 
 Light mode, Companimal palette. Filter every view by audience: Buyers, Breeders, Rescues, Owners.
@@ -41,7 +57,8 @@ All behind the dashboard password (HTTP basic auth, any username).
 - `GET /api/opportunities?days=30&lens=breeder`
 - `GET /api/rising?lens=buyer`
 - `GET /api/pipeline`
-- `POST /api/run?job=collect|hourly|morning|sitemap|paa|rollup_all`
+- `GET /api/health`
+- `POST /api/run?job=collect|hourly|morning|sitemap|paa|rollup_all|health`
 
 ## Deploy
 

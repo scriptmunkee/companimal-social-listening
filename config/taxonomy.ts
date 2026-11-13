@@ -11,7 +11,7 @@ export const PROJECT = {
   languageCode: "en",
 };
 
-export const QUERY_VERSION = "2026-11-12.1";
+export const QUERY_VERSION = "2026-11-13.1";
 
 export type Lens = "buyer" | "breeder" | "rescue" | "owner";
 
@@ -63,6 +63,12 @@ export const SERP_FORUM_QUERIES: string[] = [
   "dog breeding licence uk reddit",
   "puppy farm uk reddit",
   "rescue dog uk reddit",
+  // UK communities (plain words, not site: operators, which DataForSEO charges 5x for)
+  "puppy advice mumsnet",
+  "dog advice netmums",
+  "champdogs forum puppy",
+  "askuk reddit dog",
+  "casualuk reddit puppy",
 ];
 export const SERP_FORUM_PER_DAY = 6; // rotate through the list, 6 searches a day
 
@@ -91,6 +97,20 @@ export const YOUTUBE_QUERIES: string[] = [
   "puppy scam",
 ];
 export const YOUTUBE_VIDEOS_PER_QUERY = 3;
+
+// UK channels: each name is looked up once and remembered. Unfound names are skipped
+// and listed on the Sources page. Recent uploads (last 30 days) get their comments read.
+export const YOUTUBE_UK_CHANNELS: string[] = [
+  "@Jamiepenrithdogtraining",
+  "Will Atherton Canine Academy",
+  "Dogs Trust",
+  "Southend Dog Training",
+  "Adolescent Dogs",
+  "Battersea Dogs and Cats Home",
+  "The Kennel Club",
+  "Graeme Hall Dogfather",
+];
+export const YOUTUBE_UPLOADS_PER_CHANNEL = 2;
 export const YOUTUBE_LOOKBACK_DAYS = 30;
 
 // DataForSEO Content Analysis: web, forum and blog citations, daily.
@@ -101,6 +121,12 @@ export const CONTENT_ANALYSIS_KEYWORDS: string[] = [
   "\"rehoming a dog\"",
 ];
 export const CONTENT_ANALYSIS_LIMIT = 50;
+// Web mentions: only .uk sites plus these UK forums
+export const UK_FORUM_DOMAINS = ["mumsnet.com", "netmums.com", "champdogs.co.uk", "pistonheads.com", "moneysavingexpert.com", "digitalspy.com"];
+
+// Region signals for the rules-based tagger (the AI also judges region).
+export const UK_SIGNALS = ["£", " uk", "u.k.", "britain", "british", "england", "scotland", "wales", "northern ireland", "nhs", "council", "kennel club", "rspca", "dogs trust", "blue cross", "pdsa", "battersea", "lucy's law", "jabs", "pets4homes", "preloved", "gumtree", "london", "manchester", "birmingham", "leeds", "glasgow", "liverpool", "newcastle", "bristol", "cardiff", "edinburgh", "sheffield", "nottingham", "durham", "yorkshire", "mum ", "colour", "neighbour", "favourite"];
+export const NON_UK_SIGNALS = ["$", "usd", "akc", "aspca", "humane society", "petsmart", "petco", "chewy", "zip code", "puppy shots", "texas", "california", "florida", "new york", "ohio", "canada", "australia", "aussie", "rspca australia", "mom ", "color ", "favorite"];
 
 // Raw archive objects older than this are flagged for deletion (personal data minimisation).
 // Daily rollups and extracted questions (no usernames) are kept indefinitely.
