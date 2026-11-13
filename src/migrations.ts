@@ -35,6 +35,14 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0006_relevance_reclassify",
     sql: [`UPDATE items SET enriched=0`],
   },
+  {
+    // One-off catch-up after the relevance fixes: run everything now instead of waiting for tomorrow
+    name: "0007_catch_up",
+    sql: [
+      `CREATE TABLE IF NOT EXISTS pending_jobs (job TEXT PRIMARY KEY, created_at TEXT NOT NULL)`,
+      `INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('sitemap', datetime('now')), ('collect', datetime('now')), ('paa', datetime('now')), ('morning_when_ready', datetime('now'))`,
+    ],
+  },
 ];
 
 let checked = false;

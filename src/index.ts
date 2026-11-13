@@ -18,10 +18,33 @@ async function dailyCollect(env: Env) {
   await runJob(env, "content_analysis", () => collectContentAnalysis(env));
 }
 
-/** Hourly: pick up finished SERP tasks, enrich new items. */
+/** Every 10 minutes: pick up finished SERP tasks, enrich new items. Cheap when there's nothing to do. */
 async function hourly(env: Env) {
   await runJob(env, "serp_collect", () => collectSerpTasks(env));
   await runJob(env, "enrich", () => enrichItems(env, 400));
+  // A queued brief runs as soon as the analysis backlog is cleared
+  const waiting = await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job='morning_when_ready'`).first();
+  if (waiting) {
+    const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM items WHERE enriched=0`).first<any>();
+    if (!left?.n) {
+      await env.DB.prepare(`DELETE FROM pending_jobs WHERE job='morning_when_ready'`).run();
+      await runJob(env, "rollup", () => rollup(env, 3));
+      await runJob(env, "brief", () => buildBrief(env));
+    }
+  }
+}
+
+/** One-off jobs queued by a migration (e.g. a catch-up after a fix). Each is removed before it runs. */
+async function runPending(env: Env) {
+  const jobs: Record<string, () => Promise<unknown>> = {
+    sitemap: () => runJob(env, "sitemap", () => refreshSitemap(env)),
+    collect: () => dailyCollect(env),
+    paa: () => runJob(env, "serp_post", () => postSerpTasks(env, true, false)),
+  };
+  for (const name of Object.keys(jobs)) {
+    const r = await env.DB.prepare(`DELETE FROM pending_jobs WHERE job=?1`).bind(name).run();
+    if (r.meta?.changes) await jobs[name]();
+  }
 }
 
 /** 06:30 daily: rollups and the morning brief. Sitemap refresh on Mondays. */
@@ -48,7 +71,7 @@ export default {
     await ensureSchema(env);
     switch (event.cron) {
       case "0 2 * * *": ctx.waitUntil(dailyCollect(env)); break;
-      case "15 * * * *": ctx.waitUntil(hourly(env)); break;
+      case "*/10 * * * *": ctx.waitUntil(runPending(env).then(() => hourly(env))); break;
       case "30 6 * * *": ctx.waitUntil(morning(env)); break;
     }
   },

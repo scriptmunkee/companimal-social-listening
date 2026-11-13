@@ -26,11 +26,11 @@ async function dfs(env: Env, path: string, body?: unknown): Promise<any> {
 }
 
 /** Post today's SERP tasks to the standard (cheap) queue. Results are collected later. */
-export async function postSerpTasks(env: Env, includePaa: boolean) {
+export async function postSerpTasks(env: Env, includePaa: boolean, includeForum = true) {
   const start = (dayOfYear() * SERP_FORUM_PER_DAY) % SERP_FORUM_QUERIES.length;
   const forum = Array.from({ length: Math.min(SERP_FORUM_PER_DAY, SERP_FORUM_QUERIES.length) }, (_, i) => SERP_FORUM_QUERIES[(start + i) % SERP_FORUM_QUERIES.length]);
   const tasks = [
-    ...forum.map((q) => ({ keyword: q, location_code: PROJECT.locationCode, language_code: PROJECT.languageCode, depth: 20, search_param: "&tbs=qdr:m", tag: `csl|${PROJECT.id}|forum|${q}` })),
+    ...(includeForum ? forum : []).map((q) => ({ keyword: q, location_code: PROJECT.locationCode, language_code: PROJECT.languageCode, depth: 20, search_param: "&tbs=qdr:m", tag: `csl|${PROJECT.id}|forum|${q}` })),
     ...(includePaa ? SERP_PAA_QUERIES.map((q) => ({ keyword: q, location_code: PROJECT.locationCode, language_code: PROJECT.languageCode, depth: 10, people_also_ask_click_depth: 1, tag: `csl|${PROJECT.id}|paa|${q}` })) : []),
   ];
   if (env.MOCK === "1") {

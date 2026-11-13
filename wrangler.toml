@@ -6,8 +6,8 @@ workers_dev = true
 preview_urls = false
 
 [triggers]
-# 02:00 collect, hourly enrich, 06:30 rollup + brief (UTC)
-crons = ["0 2 * * *", "15 * * * *", "30 6 * * *"]
+# 02:00 collect, every 10 min pick up results + enrich, 06:30 rollup + brief + health (UTC)
+crons = ["0 2 * * *", "*/10 * * * *", "30 6 * * *"]
 
 [[d1_databases]]
 binding = "DB"
