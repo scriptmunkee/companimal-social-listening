@@ -153,7 +153,7 @@ export function layout(ctx: Ctx, title: string, body: string, mh: Masthead) {
 </header>
 <main id="main" class="wrap">${body}</main>
 <div class="scrim" data-close hidden></div>
-<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Question detail" hidden><div class="drawer-bar"><span class="eyebrow">Question detail</span><button type="button" class="icon-btn" data-close aria-label="Close">Close <kbd>Esc</kbd></button></div><div class="drawer-body" id="drawer-body"></div></aside>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Question detail" hidden><div class="drawer-bar"><span class="eyebrow">Question detail</span><button type="button" class="icon-btn" data-close aria-label="Close">Close <kbd class="d-only">Esc</kbd></button></div><div class="drawer-body" id="drawer-body"></div></aside>
 <dialog class="keys" id="keys"><h2>Keyboard shortcuts</h2><dl>
 <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next and previous question</dd>
 <dt><kbd>o</kbd> <kbd>Enter</kbd></dt><dd>Open the focused question or thread</dd>
@@ -170,6 +170,7 @@ const CSS = `
 :root{--cream:#F8F4EE;--well:#F2ECE3;--well-2:#EBE4D9;--paper:#FFFFFF;--sand:#E8E4DD;--rule:#D9D2C6;--grey:#766F61;--ink:#1A1614;--ink-2:#3D3732;--forest:#2F4A3A;--forest-tint:#E4EBE5;--terra:#C8552D;--terra-ink:#A8441F;--terra-tint:#F7E4DA;
 --display:"Instrument Serif",Georgia,serif;--sans:"Instrument Sans",ui-sans-serif,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace;--r:10px;--ease:cubic-bezier(.2,.7,.2,1)}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+[hidden]{display:none!important}
 body{margin:0;background:var(--cream);color:var(--ink);font:400 14.5px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
 .wrap{max-width:1240px;margin:0 auto;padding-left:32px;padding-right:32px}
 a{color:inherit;text-decoration-color:var(--rule);text-underline-offset:3px}
@@ -413,10 +414,10 @@ details.more>summary:hover{color:var(--ink)}
 .quotes li span{display:block;font-size:12px;color:var(--grey);margin-top:3px}
 
 /* Drawer */
-.scrim{position:fixed;inset:0;background:rgba(26,22,20,.22);z-index:40;opacity:0;transition:opacity .2s}
-.scrim.open{opacity:1}
-.drawer{position:fixed;top:0;right:0;bottom:0;width:min(600px,100vw);background:var(--paper);border-left:1px solid var(--rule);z-index:41;display:flex;flex-direction:column;transform:translateX(24px);opacity:0;transition:transform .24s var(--ease),opacity .18s}
-.drawer.open{transform:none;opacity:1}
+.scrim{position:fixed;inset:0;background:rgba(26,22,20,.22);z-index:40;opacity:0;transition:opacity .2s;pointer-events:none}
+.scrim.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(600px,100vw);background:var(--paper);border-left:1px solid var(--rule);z-index:41;display:flex;flex-direction:column;transform:translateX(24px);opacity:0;pointer-events:none;transition:transform .24s var(--ease),opacity .18s}
+.drawer.open{transform:none;opacity:1;pointer-events:auto}
 .drawer-bar{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;border-bottom:1px solid var(--sand)}
 .drawer-bar .eyebrow{margin:0}
 .drawer-body{overflow-y:auto;padding:22px 26px 40px;flex:1}
