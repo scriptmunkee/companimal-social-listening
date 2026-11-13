@@ -104,6 +104,8 @@ export async function postSubredditTasks(env: Env) {
 
 /** Collect finished SERP tasks from the standard queue. */
 export async function collectSerpTasks(env: Env) {
+  // Give up on anything still unfinished after a day (DataForSEO keeps results for 3 days)
+  await env.DB.prepare(`UPDATE serp_tasks SET fetched_at='expired' WHERE fetched_at IS NULL AND posted_at < ?1`).bind(new Date(Date.now() - 86400000).toISOString()).run();
   const pending = await env.DB.prepare(`SELECT task_id, kind, query FROM serp_tasks WHERE fetched_at IS NULL AND project=?1 ORDER BY posted_at LIMIT 100`).bind(PROJECT.id).all<any>();
   let added = 0, seen = 0;
   const list = pending.results || [];
@@ -126,7 +128,14 @@ export async function collectSerpTasks(env: Env) {
       raw = fetched.get(t.task_id);
       if (!raw || raw.error) continue; // still queued or a transient error: try again next run
       const task = raw.tasks?.[0];
-      if (!task || task.status_code !== 20000) continue;
+      if (!task) continue;
+      // 40601/40602 = still being processed: check again next run
+      if (task.status_code === 40601 || task.status_code === 40602) continue;
+      if (task.status_code !== 20000) {
+        // Final error (e.g. no results): stop polling it
+        await env.DB.prepare(`UPDATE serp_tasks SET fetched_at=?2 WHERE task_id=?1`).bind(t.task_id, nowIso()).run();
+        continue;
+      }
       result = task.result?.[0];
     }
     const key = await archiveRaw(env, "serp", `${t.kind}-${t.query}`, raw);
