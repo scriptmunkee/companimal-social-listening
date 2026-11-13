@@ -7,6 +7,7 @@ export interface Env {
   DATAFORSEO_LOGIN?: string;
   DATAFORSEO_PASSWORD?: string;
   YOUTUBE_API_KEY?: string;
+  SERPENT_API_KEY?: string; // Reddit via apiserpent.com
   DASHBOARD_PASSWORD?: string;
   HASH_SALT?: string;
   ALERTS?: SendEmail;

@@ -15,6 +15,7 @@ export interface ThreadRow {
   last_seen: string; seen_count: number; best_rank: number | null; posts_count: number | null; posts_count_prev: number | null;
   kind: string | null; theme: string | null; pain_point: string | null; need: string | null; emotion: string | null;
   content_angle: string | null; lens: string | null; topic: string | null; region: string | null; score: number; growth: number;
+  upvotes: number | null; replies: string | null; flair: string | null; via: string | null;
 }
 
 export async function loadThreads(env: Env, opts: { days: number; lens?: string; region: RegionFilter; sub?: string; kind?: string; topic?: string }): Promise<ThreadRow[]> {
@@ -26,9 +27,10 @@ export async function loadThreads(env: Env, opts: { days: number; lens?: string;
   if (opts.sub) add(`lower(t.subreddit) = lower(?)`, opts.sub);
   if (opts.kind) add(`i.kind = ?`, opts.kind);
   if (opts.topic) add(`i.topic = ?`, opts.topic);
-  const rows = (await env.DB.prepare(`SELECT t.*, i.kind, i.theme, i.pain_point, i.need, i.emotion, i.content_angle, i.lens, i.topic, i.region
+  const rows = (await env.DB.prepare(`SELECT t.*, i.kind, i.theme, i.pain_point, i.need, i.emotion, i.content_angle, i.lens, i.topic, i.region, i.replies
     FROM reddit_threads t LEFT JOIN reddit_insights i ON i.post_id = t.post_id WHERE ${where.join(" AND ")} LIMIT 3000`).bind(...binds).all<any>()).results || [];
-  return rows.map((r: any) => ({ ...r, score: threadScore(r), growth: Math.max(0, (r.posts_count || 0) - (r.posts_count_prev ?? r.posts_count ?? 0)) }));
+  // `score` in the table is Reddit's upvotes; on a row it's our "doing well" score, upvotes keep their own name
+  return rows.map((r: any) => ({ ...r, upvotes: r.score ?? null, score: threadScore(r), growth: Math.max(0, (r.posts_count || 0) - (r.posts_count_prev ?? r.posts_count ?? 0)) }));
 }
 
 function age(iso: string | null) {
@@ -41,6 +43,9 @@ function age(iso: string | null) {
 }
 
 export const KINDS = KIND_LABELS;
+
+/** When the thread was posted. Search finds of unknown age sort as old, not as new. */
+const postedAt = (t: ThreadRow) => Date.parse(t.created_at || (t.via === "search" ? "1970-01-01" : t.first_seen));
 
 const SENTIMENT: Record<string, string> = { negative: "Mostly negative", positive: "Mostly positive", mixed: "Mixed feelings", neutral: "Neutral" };
 
@@ -57,13 +62,13 @@ export async function viewReddit(env: Env, url: URL, ctx: Ctx): Promise<{ title:
   const [all, queued] = await Promise.all([loadThreads(env, { days, lens: ctx.lens, region: ctx.region, sub, kind, topic }), queuedSet(env)]);
   const threads = [...all].sort((a, b) =>
     sort === "discussed" ? (b.posts_count || 0) - (a.posts_count || 0)
-    : sort === "new" ? Date.parse(b.created_at || b.first_seen) - Date.parse(a.created_at || a.first_seen)
+    : sort === "new" ? postedAt(b) - postedAt(a)
     : b.score - a.score);
 
   const themeDate = await env.DB.prepare(`SELECT MAX(date) AS d FROM reddit_themes WHERE project=?1`).bind(PROJECT.id).first<any>();
   const themes = themeDate?.d ? ((await env.DB.prepare(`SELECT * FROM reddit_themes WHERE project=?1 AND date=?2 ORDER BY thread_count DESC`).bind(PROJECT.id, themeDate.d).all<any>()).results || []) : [];
   const byId = new Map(all.map((t) => [t.post_id, t]));
-  const totals = await env.DB.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN posts_count IS NOT NULL THEN 1 ELSE 0 END) AS withc, COUNT(DISTINCT subreddit) AS subs, SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS new24 FROM reddit_threads WHERE project=?1`).bind(PROJECT.id, new Date(Date.now() - 86400000).toISOString()).first<any>();
+  const totals = await env.DB.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN posts_count IS NOT NULL THEN 1 ELSE 0 END) AS withc, SUM(CASE WHEN source='api' THEN 1 ELSE 0 END) AS api, COUNT(DISTINCT subreddit) AS subs, SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS new24 FROM reddit_threads WHERE project=?1`).bind(PROJECT.id, new Date(Date.now() - 86400000).toISOString()).first<any>();
   const pending = await env.DB.prepare(`SELECT COUNT(*) AS n FROM reddit_threads WHERE insight_done=0`).first<any>();
 
   // Subreddit leaderboard and mixes (from the threads in view)
@@ -96,7 +101,7 @@ export async function viewReddit(env: Env, url: URL, ctx: Ctx): Promise<{ title:
     return `<article class="panel hero c-7"><div>${eyebrow("Biggest conversation this week")}${meta}</div><h2>${esc(t.theme)}</h2><p class="why">${esc(t.summary || "")}</p>
 ${t.why ? `<div><p class="eyebrow">Why it matters</p><p style="margin:0;color:var(--ink-2)">${esc(t.why)}</p></div>` : ""}
 ${ideas.length ? `<div><p class="eyebrow">Article ideas</p><ol class="h2list">${ideas.slice(0, 4).map((i, n) => `<li><span>${String(n + 1).padStart(2, "0")}</span><div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><span style="font:inherit;color:inherit">${esc(i)}</span>${sendButton(tTopic, i, queued.has(queueKey(tTopic, i)), true)}</div></li>`).join("")}</ol></div>` : ""}
-${ex.length ? `<div><p class="eyebrow">Threads behind it</p><ul class="quotes">${ex.map((e) => `<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc((e.title || "Untitled thread").slice(0, 110))}</a><span>r/${esc(e.subreddit)}${e.posts_count ? ` · ${fmt(e.posts_count)} comments` : ""}</span></li>`).join("")}</ul></div>` : ""}</article>`;
+${ex.length ? `<div><p class="eyebrow">Threads behind it</p><ul class="quotes">${ex.map((e) => `<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc((e.title || "Untitled thread").slice(0, 110))}</a><span>r/${esc(e.subreddit)}${e.upvotes ? ` · ${fmt(e.upvotes)} upvotes` : ""}${e.posts_count ? ` · ${fmt(e.posts_count)} comments` : ""}</span></li>`).join("")}</ul></div>` : ""}</article>`;
   };
   const restThemes = themes.slice(1, 6);
   const themesHtml = themes.length ? `<div class="bento">${themeCard(themes[0], true)}<section class="panel queue c-5">${eyebrow("Also being talked about")}${restThemes.length ? `<ol>${restThemes.map((t: any, i: number) => themeCard(t, false, i + 2)).join("")}</ol>` : `<p class="muted" style="margin:12px 0 0">One theme so far.</p>`}</section></div>`
@@ -116,9 +121,9 @@ ${segmented("Period", [7, 30, 90].map((d) => ({ href: link({ days: d === 7 ? und
   const maxScore = Math.max(1, ...threads.map((t) => t.score));
   const rows = slice.map((t, i) => `<tr data-row tabindex="0">
 <td class="rank">${String((page - 1) * per + i + 1).padStart(2, "0")}</td>
-<td class="qcell"><a class="qlink" data-ext href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title || "Untitled thread")}</a>${t.snippet ? `<p class="snip">${esc(t.snippet.slice(0, 180))}${t.snippet.length > 180 ? "…" : ""}</p>` : ""}<div class="qmeta"><a class="tag" href="${link({ sub: t.subreddit, page: undefined })}">r/${esc(t.subreddit)}</a><span>${age(t.created_at || t.first_seen)} old</span><span>Seen ${fmt(t.seen_count)} ${t.seen_count === 1 ? "time" : "times"}</span><span class="m-only">${t.posts_count !== null && t.posts_count !== undefined ? `${fmt(t.posts_count)} comments${t.growth ? `, +${fmt(t.growth)}` : ""} · ` : ""}score ${t.score.toFixed(1)}</span></div></td>
+<td class="qcell"><a class="qlink" data-ext href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title || "Untitled thread")}</a>${t.snippet ? `<p class="snip">${esc(t.snippet.slice(0, 180))}${t.snippet.length > 180 ? "…" : ""}</p>` : ""}<div class="qmeta"><a class="tag" href="${link({ sub: t.subreddit, page: undefined })}">r/${esc(t.subreddit)}</a>${t.created_at || t.via !== "search" ? `<span>${age(t.created_at || t.first_seen)} old</span>` : ""}${t.upvotes !== null && t.upvotes !== undefined ? `<span>${fmt(t.upvotes)} upvotes</span>` : ""}${t.flair ? `<span>${esc(t.flair.replace(/^\[|\]$/g, ""))}</span>` : ""}<span>Seen ${fmt(t.seen_count)} ${t.seen_count === 1 ? "time" : "times"}</span><span class="m-only">${t.posts_count !== null && t.posts_count !== undefined ? `${fmt(t.posts_count)} comments${t.growth ? `, +${fmt(t.growth)}` : ""} · ` : ""}score ${t.score.toFixed(1)}</span></div></td>
 <td class="num d-only">${t.posts_count !== null && t.posts_count !== undefined ? fmt(t.posts_count) : `<span class="muted">n/a</span>`}${t.growth ? `<div class="up" style="font-size:12.5px">+${fmt(t.growth)}</div>` : ""}</td>
-<td class="about">${t.kind ? `<span class="tag">${esc(KIND_LABELS[t.kind] || t.kind)}</span>` : ""}${t.theme ? `<div class="theme">${esc(t.theme)}</div>` : `<div class="muted">Being analysed</div>`}${t.pain_point ? `<div class="muted small">${esc(t.pain_point)}</div>` : ""}${t.emotion && t.emotion !== "neutral" ? `<div class="muted small">Feeling ${esc(t.emotion)}${t.need ? `; wants ${esc(t.need)}` : ""}</div>` : ""}</td>
+<td class="about">${t.kind ? `<span class="tag">${esc(KIND_LABELS[t.kind] || t.kind)}</span>` : ""}${t.theme ? `<div class="theme">${esc(t.theme)}</div>` : `<div class="muted">Being analysed</div>`}${t.pain_point ? `<div class="muted small">${esc(t.pain_point)}</div>` : ""}${t.emotion && t.emotion !== "neutral" ? `<div class="muted small">Feeling ${esc(t.emotion)}${t.need ? `; wants ${esc(t.need)}` : ""}</div>` : ""}${t.replies ? `<div class="muted small"><b style="font-weight:600">Replies:</b> ${esc(t.replies)}</div>` : ""}</td>
 <td class="angle">${t.content_angle ? `<div><b class="m-only" style="font-weight:600">Angle: </b>${esc(t.content_angle)}</div>` : ""}</td>
 <td class="num score d-only">${t.score.toFixed(1)}${meter(t.score / maxScore)}</td>
 <td class="act">${t.content_angle ? sendButton(t.topic || "other", t.content_angle, queued.has(queueKey(t.topic || "other", t.content_angle)), true) : ""}</td></tr>`).join("");
@@ -135,7 +140,8 @@ ${segmented("Period", [7, 30, 90].map((d) => ({ href: link({ days: d === 7 ? und
     return `<tr><td class="name"><a class="qlink" href="${link({ sub: s, page: undefined })}">r/${esc(s)}</a></td><td class="num">${fmt(v.n)}</td><td class="num">${v.withc ? fmt(Math.round(v.comments / v.withc)) : `<span class="muted">n/a</span>`}</td><td style="min-width:140px"><div style="display:flex;gap:10px;align-items:center">${meter(v.questions / v.n)}<span>${pct(v.questions, v.n)}%</span></div></td><td class="num">${pct(v.emotional, v.n)}%</td><td class="d-only">${top ? esc(top[0]) : ""}</td></tr>`;
   }).join("")}</tbody></table></div>` : empty("No subreddit data yet");
 
-  const body = `<div class="page-head"><div>${eyebrow("From Google's index of Reddit")}<h1>Reddit</h1><p class="lede">What dog people on Reddit are talking about. Comment counts come from Google's Discussions and forums results; the comments themselves aren't available, so themes are read from titles and snippets.</p></div></div>
+  const body = `<div class="page-head"><div>${totals?.api ? `${eyebrow("From Reddit, via Serpent API")}<h1>Reddit</h1><p class="lede">What dog people on Reddit are talking about: every new, hot and rising thread in the subreddits we watch, plus Reddit searches across the whole site. Upvotes and comment counts are refreshed every few hours, and themes are read from the posts and their most upvoted replies.</p>`
+  : `${eyebrow("From Google's index of Reddit")}<h1>Reddit</h1><p class="lede">What dog people on Reddit are talking about. Comment counts come from Google's Discussions and forums results; the comments themselves aren't available, so themes are read from titles and snippets.</p>`}</div></div>
 ${pending?.n ? notice(`<b>${fmt(pending.n)} ${pending.n === 1 ? "thread is" : "threads are"} still being analysed.</b> Themes, pain points and angles fill in as they're read, every 10 minutes.`) : ""}
 <div class="kpis" style="margin-top:0"><div><div class="v">${fmt(totals?.n)}</div><div class="l">Threads tracked</div><div class="s">Across ${fmt(totals?.subs)} subreddits</div></div><div><div class="v">${fmt(totals?.new24)}</div><div class="l">New, 24 hours</div></div><div><div class="v">${fmt(totals?.withc)}</div><div class="l">With comment counts</div><div class="s">${pct(totals?.withc || 0, totals?.n || 0)}% of threads</div></div><div><div class="v">${fmt(all.length)}</div><div class="l">In view</div><div class="s">Last ${days} days${sub ? `, r/${esc(sub)}` : ""}</div></div></div>
 ${section("What people are talking about", themeDate?.d ? `Themes for ${esc(dateShort(themeDate.d))}` : "")}${themesHtml}

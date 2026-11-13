@@ -22,7 +22,8 @@ export async function checkHealth(env: Env): Promise<HealthIssue[]> {
   const issues: HealthIssue[] = [];
   const first = await env.DB.prepare(`SELECT MIN(started_at) AS t FROM runs WHERE project=?1`).bind(PROJECT.id).first<any>();
   const young = !first?.t || first.t > since; // under 26 hours old: not every job has had its turn
-  for (const exp of EXPECTED) {
+  const expected = env.SERPENT_API_KEY ? [...EXPECTED, { job: "reddit_feeds", mustCollect: true }, { job: "reddit_comments", mustCollect: false }] : EXPECTED;
+  for (const exp of expected) {
     const runs = rows.filter((r: any) => r.job === exp.job);
     if (!runs.length) { if (young) continue; issues.push({ job: exp.job, problem: "did not run in the last 26 hours" }); continue; }
     const latest = [...runs].sort((a: any, b: any) => (a.started_at < b.started_at ? 1 : -1))[0];

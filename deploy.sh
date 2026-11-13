@@ -23,7 +23,7 @@ npx wrangler r2 bucket create "$BUCKET" 2>/dev/null || echo "R2 bucket exists"
 npx wrangler r2 bucket lifecycle add "$BUCKET" expire-raw raw/ --expire-days 730 --force 2>/dev/null || echo "Lifecycle rule exists or needs setting in the dashboard"
 
 # 3. Secrets
-for S in DATAFORSEO_LOGIN DATAFORSEO_PASSWORD YOUTUBE_API_KEY DASHBOARD_PASSWORD; do
+for S in DATAFORSEO_LOGIN DATAFORSEO_PASSWORD YOUTUBE_API_KEY SERPENT_API_KEY DASHBOARD_PASSWORD; do
   if [ -n "${!S:-}" ]; then printf '%s' "${!S}" | npx wrangler secret put "$S"; else echo "Skipping $S (not set)"; fi
 done
 openssl rand -hex 16 | npx wrangler secret put HASH_SALT

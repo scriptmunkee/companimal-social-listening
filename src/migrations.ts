@@ -100,6 +100,37 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0014_rebuild_themes_again",
     sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('reddit_themes_now', datetime('now'))`],
   },
+  {
+    // Reddit via Serpent API: real metrics, post bodies, comment threads, and growth snapshots
+    name: "0015_reddit_api",
+    sql: [
+      `ALTER TABLE reddit_threads ADD COLUMN score INTEGER`,
+      `ALTER TABLE reddit_threads ADD COLUMN score_prev INTEGER`,
+      `ALTER TABLE reddit_threads ADD COLUMN upvote_ratio REAL`,
+      `ALTER TABLE reddit_threads ADD COLUMN body TEXT`,
+      `ALTER TABLE reddit_threads ADD COLUMN flair TEXT`,
+      `ALTER TABLE reddit_threads ADD COLUMN post_type TEXT`,
+      `ALTER TABLE reddit_threads ADD COLUMN author_hash TEXT`,
+      `ALTER TABLE reddit_threads ADD COLUMN source TEXT`,
+      `ALTER TABLE reddit_threads ADD COLUMN metrics_at TEXT`,
+      `ALTER TABLE reddit_threads ADD COLUMN comments_fetched_at TEXT`,
+      `ALTER TABLE reddit_threads ADD COLUMN comments_at_fetch INTEGER`,
+      `ALTER TABLE reddit_threads ADD COLUMN insight_with_comments INTEGER DEFAULT 0`,
+      `CREATE INDEX IF NOT EXISTS idx_rt_cfetch ON reddit_threads(comments_fetched_at)`,
+      // Upvotes and comments each time a thread is seen in a feed (hourly grain): growth over time
+      `CREATE TABLE IF NOT EXISTS reddit_metrics (post_id TEXT NOT NULL, ts TEXT NOT NULL, score INTEGER, comments INTEGER, PRIMARY KEY (post_id, ts))`,
+      // The comments themselves (authors hashed), for the AI reading and the dashboard
+      `CREATE TABLE IF NOT EXISTS reddit_comments (
+        comment_id TEXT PRIMARY KEY, post_id TEXT NOT NULL, parent_id TEXT, depth INTEGER, author_hash TEXT,
+        body TEXT, score INTEGER, created_at TEXT, fetched_at TEXT)`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_post ON reddit_comments(post_id, score)`,
+      // Paid API calls per day, for cost tracking and the daily ceiling
+      `CREATE TABLE IF NOT EXISTS api_usage (day TEXT NOT NULL, api TEXT NOT NULL, kind TEXT NOT NULL, calls INTEGER DEFAULT 0, units INTEGER DEFAULT 0, PRIMARY KEY (day, api, kind))`,
+      `ALTER TABLE reddit_insights ADD COLUMN replies TEXT`,
+      // First full Serpent pull as soon as the key is in place, then themes once it's read
+      `INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('reddit_api_now', datetime('now')), ('reddit_themes_when_ready', datetime('now'))`,
+    ],
+  },
 ];
 
 let checked = false;

@@ -35,21 +35,27 @@ Every morning a health check looks at the last 26 hours. If any job failed, didn
 
 ## Reddit
 
-Reddit is read through **Google's index of Reddit** (via DataForSEO). The tool never calls Reddit directly: Reddit blocks automated access from servers and has closed its API to new users, and we don't work around that.
+Reddit comes through **Serpent API** (apiserpent.com, a third-party Reddit data API) whenever the `SERPENT_API_KEY` secret is set. Without the key, the tool falls back to **Google's index of Reddit** via DataForSEO, as before. Both feed the same tables.
 
-| Layer | How | Gives |
+| Layer | How (Serpent) | Gives |
 |---|---|---|
-| Fresh threads | Per subreddit, daily: `site:reddit.com/r/x` past day + past week + 2 rotating angles (`REDDIT_FACETS`) | New threads, title, snippet, posted time, Google rank |
-| Comment counts | ~60 topic searches (`REDDIT_TOPIC_QUERIES`) daily, plus 30 questions harvested from Reddit, plus re-running searches that recently surfaced commented threads | Google's Discussions and forums block lists Reddit threads with `posts_count` (comments); about 1 in 3 searches shows it |
-| Registry | `reddit_threads` keyed by Reddit post id; every sighting in `reddit_thread_hits` | Comment growth over time, repeat appearances, best rank |
-| Insights | Workers AI per thread (`reddit_insights`) | Kind (question, advice request, vent, story, debate...), theme, pain point, need, emotion, content angle, audience, topic, region |
-| Themes | Daily AI grouping of the week's threads (`reddit_themes`, one snapshot per day) | What people are talking about, why it matters, article ideas |
+| Feeds | Every 3 hours, each subreddit in `SUBREDDITS`: `new` (100), `hot` (50), `rising` (25). r/AskUK and r/CasualUK keep only posts that mention dogs (`REDDIT_DOG_FILTER`) | Every new thread, with post body, upvotes, upvote ratio, comment count, flair, posted time |
+| Best of | Daily: `top` of the week (100) and the month (50) per subreddit | What did best |
+| Search | Daily: ~60 topic searches (`REDDIT_TOPIC_QUERIES`), UK subreddit searches (`REDDIT_UK_SEARCHES`), 30 questions harvested from Reddit | Threads anywhere on Reddit, including evergreen ones |
+| Comments | Every 10 minutes, up to 1,000 threads a day: threads with 3+ comments, fetched again when comments grow by half (and by 10+) | The replies themselves (`reddit_comments`, authors hashed) |
+| Growth | A snapshot each time a thread is seen (`reddit_metrics`, hourly grain) | Comment and upvote growth over the last day |
+| Insights | Workers AI per thread, reading the post body and the 6 most upvoted replies (`reddit_insights`) | Kind, theme, pain point, need, emotion, content angle, audience, topic, region, and what the replies say |
+| Themes | Daily AI grouping of the last 7 days' threads posted in the last 30 days (`reddit_themes`) | What people are talking about, why it matters, article ideas |
 
-"Doing well" score (`threadScore`): comments, comment growth, repeat sightings, Google rank and freshness.
+"Doing well" score (`threadScore`): comments and upvotes (discounted by age), growth in both over the last day, repeat sightings and feed rank. Old evergreen threads still lead "Most discussed".
 
-Not available: comment text and upvote scores. If proper Reddit data access is ever obtained (an approved Reddit Data API app or a licensed data provider), it can feed the same tables.
+Every Serpent call is counted in `api_usage` (per day, per endpoint) and each run's cost shows in `runs.cost_usd`. Out of credit (HTTP 402) or a rejected key makes the run fail, which triggers the health alert email.
 
-Cost: roughly $0.24 a day for Reddit, most of it `site:` searches (DataForSEO charges those at 5x).
+Cost: about $0.20 a day (feeds ~$0.05, searches ~$0.01, comments up to ~$0.15). Serpent charges $0.12 per 1,000 calls, and posts and comments per started block of 25.
+
+Search results carry no date; until a thread's comments are fetched, its age is unknown and it isn't treated as new. The earliest comment then stands in for the posting date.
+
+Note: Serpent is not Reddit's official API. If it stops working, remove the secret and the Google route takes over.
 
 ## Dashboard
 

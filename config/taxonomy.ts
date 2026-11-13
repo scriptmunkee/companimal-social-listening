@@ -11,7 +11,7 @@ export const PROJECT = {
   languageCode: "en",
 };
 
-export const QUERY_VERSION = "2026-11-13.2";
+export const QUERY_VERSION = "2026-11-13.3";
 
 export type Lens = "buyer" | "breeder" | "rescue" | "owner";
 
@@ -128,6 +128,38 @@ export const REDDIT_TOPIC_PER_DAY = 1000;   // the whole bank, every day (~$0.00
 export const REDDIT_SNOWBALL_PER_DAY = 30;  // plus fresh questions harvested from Reddit itself
 export const REDDIT_TRACKED_PER_DAY = 40;   // plus re-running searches that recently surfaced commented threads
 export const REDDIT_INSIGHTS_PER_RUN = 96;  // threads analysed per 10-minute run
+
+// ---------------------------------------------------------------------------
+// Reddit via Serpent API (apiserpent.com): real listings, upvotes, post bodies and comments.
+// Used whenever the SERPENT_API_KEY secret is set; otherwise the Google route above runs.
+// Pricing: $0.12 per 1,000 calls; posts and comments are billed per started block of 25.
+// ---------------------------------------------------------------------------
+// Subreddit feeds, refreshed every few hours so upvote and comment growth is measured.
+export const REDDIT_FEEDS: { sort: "new" | "hot" | "rising"; limit: number }[] = [
+  { sort: "new", limit: 100 },   // every new thread
+  { sort: "hot", limit: 50 },    // what the subreddit is talking about now
+  { sort: "rising", limit: 25 }, // what's taking off
+];
+export const REDDIT_FEEDS_EVERY_HOURS = 3;
+// Once a day: the best of the week and the month
+export const REDDIT_TOP: { t: "week" | "month"; limit: number }[] = [
+  { t: "week", limit: 100 },
+  { t: "month", limit: 50 },
+];
+// Extra daily searches inside the UK subreddits (whose feeds are mostly not about dogs)
+export const REDDIT_UK_SEARCHES = [
+  "subreddit:AskUK dog", "subreddit:AskUK puppy", "subreddit:AskUK dog breeder", "subreddit:AskUK rescue dog",
+  "subreddit:CasualUK dog", "subreddit:CasualUK puppy", "subreddit:unitedkingdom dog", "subreddit:LegalAdviceUK dog",
+  "subreddit:UKPersonalFinance dog", "subreddit:UKPersonalFinance pet insurance",
+];
+// Posts in filtered subreddits must mention dogs in the title or body
+export const REDDIT_DOG_FILTER = /\b(dogs?|pupp(y|ies)|pups?|canine|breeders?|rescue dog|kennels?|whelp\w*|litters?|spaniel|labrador|retriever|terrier|poodle|cockapoo|cavapoo|doodle|bulldog|collie|dachshund|pug|husky|greyhound|lurcher|staff(ie|y)|xl bully|dog walker|doggy daycare)\b/i;
+// Comment threads: fetched once a thread has a few comments, again when it keeps growing
+export const REDDIT_COMMENTS_MIN = 3;           // skip threads with fewer comments than this
+export const REDDIT_COMMENTS_PER_DAY = 1000;    // ceiling on comment fetches a day (about $0.15)
+export const REDDIT_COMMENTS_PER_TICK = 40;     // per 10-minute run
+export const REDDIT_COMMENTS_REFETCH_GROWTH = 1.5; // fetch again when comments grow by half (and by 10+)
+export const REDDIT_COMMENTS_TOP = 6;            // top comments shown to the AI per thread
 
 export const SERP_PAA_QUERIES: string[] = [
   "buying a puppy",

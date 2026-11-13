@@ -68,15 +68,16 @@ export async function recordRedditHits(env: Env, hits: RedditHit[], query: strin
         title = COALESCE(reddit_threads.title, excluded.title),
         snippet = CASE WHEN length(COALESCE(excluded.snippet,'')) > length(COALESCE(reddit_threads.snippet,'')) THEN excluded.snippet ELSE reddit_threads.snippet END,
         created_at = COALESCE(reddit_threads.created_at, excluded.created_at),
-        posts_count_prev = CASE WHEN excluded.posts_count IS NOT NULL AND excluded.posts_count <> COALESCE(reddit_threads.posts_count, -1) THEN reddit_threads.posts_count ELSE reddit_threads.posts_count_prev END,
-        posts_count = COALESCE(excluded.posts_count, reddit_threads.posts_count),
+        posts_count_prev = CASE WHEN reddit_threads.metrics_at IS NULL AND excluded.posts_count IS NOT NULL AND excluded.posts_count <> COALESCE(reddit_threads.posts_count, -1) THEN reddit_threads.posts_count ELSE reddit_threads.posts_count_prev END,
+        posts_count = CASE WHEN reddit_threads.metrics_at IS NULL THEN COALESCE(excluded.posts_count, reddit_threads.posts_count) ELSE reddit_threads.posts_count END,
         posts_count_max = MAX(COALESCE(reddit_threads.posts_count_max, 0), COALESCE(excluded.posts_count, 0)),
         via = CASE WHEN excluded.via = 'discussions' THEN 'discussions' ELSE reddit_threads.via END`)
       .bind(h.postId, PROJECT.id, h.subreddit, h.url, h.title, h.snippet, h.createdAt, now, h.rank, h.postsCount, h.via));
     stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO reddit_thread_hits (post_id, seen_date, query, rank, posts_count, via) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`)
       .bind(h.postId, day, query.slice(0, 200), h.rank, h.postsCount, h.via));
     if (h.postsCount !== null) {
-      stmts.push(env.DB.prepare(`UPDATE items SET engagement = MAX(engagement, ?2) WHERE id = ?1`).bind(`reddit:${h.postId}`, h.postsCount));
+      // Google's count lags; Serpent's real counts win once a thread has them
+      stmts.push(env.DB.prepare(`UPDATE items SET engagement = MAX(engagement, ?2) WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM reddit_threads WHERE post_id = ?3 AND metrics_at IS NOT NULL)`).bind(`reddit:${h.postId}`, h.postsCount, h.postId));
     }
   }
   for (let i = 0; i < stmts.length; i += 60) await env.DB.batch(stmts.slice(i, i + 60));
@@ -87,7 +88,7 @@ export async function recordRedditHits(env: Env, hits: RedditHit[], query: strin
 }
 
 /** Questions recently pulled out of Reddit and People Also Ask, not searched in the last 30 days. */
-async function snowballQueries(env: Env, limit: number): Promise<string[]> {
+export async function snowballQueries(env: Env, limit: number): Promise<string[]> {
   const rows = await env.DB.prepare(`
     SELECT e.question AS q, COUNT(*) AS n FROM enrichments e JOIN items i ON i.id = e.item_id
     WHERE i.project=?1 AND e.question IS NOT NULL AND i.source IN ('reddit','serp_paa') AND i.collected_date >= ?2
@@ -187,12 +188,20 @@ export async function backfillRedditItems(env: Env) {
   return { items, note: `${hits.length} earlier Reddit results moved into the thread registry` };
 }
 
-/** "Doing well" score: comments, comment growth, repeat sightings, Google rank, freshness. */
-export function threadScore(t: { posts_count?: number | null; posts_count_prev?: number | null; seen_count?: number | null; best_rank?: number | null; created_at?: string | null; first_seen?: string | null }): number {
+/**
+ * "Doing well" score. Engagement (comments, upvotes) and growth over the last day, discounted by age
+ * so this week's busy threads lead and years-old evergreen threads sit lower (they still top "Most discussed").
+ */
+export function threadScore(t: { posts_count?: number | null; posts_count_prev?: number | null; score?: number | null; score_prev?: number | null; seen_count?: number | null; best_rank?: number | null; created_at?: string | null; first_seen?: string | null }): number {
   const comments = t.posts_count || 0;
+  const upvotes = Math.max(0, t.score || 0);
   const growth = Math.max(0, comments - (t.posts_count_prev ?? comments));
-  const ageDays = (Date.now() - Date.parse(t.created_at || t.first_seen || new Date().toISOString())) / 86400000;
-  const fresh = ageDays <= 2 ? 3 : ageDays <= 7 ? 1.5 : ageDays <= 30 ? 0.5 : 0;
+  const upGrowth = Math.max(0, upvotes - Math.max(0, t.score_prev ?? upvotes));
+  const created = t.created_at ? Date.parse(t.created_at) : NaN;
+  const ageDays = Number.isFinite(created) ? (Date.now() - created) / 86400000 : Infinity; // unknown age: not treated as fresh
+  const recency = ageDays <= 2 ? 1 : ageDays <= 7 ? 0.85 : ageDays <= 30 ? 0.6 : 0.35;
   const rank = t.best_rank && t.best_rank < 999 ? Math.max(0, 11 - Math.min(t.best_rank, 11)) * 0.25 : 0;
-  return Math.round((Math.log2(1 + comments) * 3 + Math.log2(1 + growth) * 2 + Math.log2(1 + (t.seen_count || 1)) * 2 + rank + fresh) * 10) / 10;
+  const engagement = Math.log2(1 + comments) * 3 + Math.log2(1 + upvotes) * 2;
+  const momentum = Math.log2(1 + growth) * 2.5 + Math.log2(1 + upGrowth) * 1.5;
+  return Math.round(((engagement + rank) * recency + momentum + Math.log2(1 + (t.seen_count || 1)) * 1.5) * 10) / 10;
 }

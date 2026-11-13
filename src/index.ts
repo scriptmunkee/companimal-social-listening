@@ -3,6 +3,7 @@ import { PROJECT } from "../config/taxonomy";
 import { Env, runJob, recordQueryVersion, nowIso, saveItems, withLock } from "./lib";
 import { postSerpTasks, collectSerpTasks, collectContentAnalysis } from "./collectors/dataforseo";
 import { postRedditTasks, backfillRedditItems } from "./collectors/reddit";
+import { hasSerpent, collectRedditFeeds, collectRedditDaily, collectRedditComments, collectRedditNow, pruneReddit } from "./collectors/reddit-api";
 import { analyseRedditThreads, buildRedditThemes } from "./reddit-insights";
 import { redditThreadsApi, redditThemesApi } from "./dashboard/reddit";
 import { collectYoutube } from "./collectors/youtube";
@@ -18,7 +19,8 @@ async function dailyCollect(env: Env) {
   await recordQueryVersion(env, TAX);
   const monday = new Date().getUTCDay() === 1;
   await runJob(env, "serp_post", () => postSerpTasks(env, monday));
-  await runJob(env, "reddit_post", () => postRedditTasks(env, "daily"));
+  // Reddit through Serpent when its key is set; Google's index of Reddit otherwise
+  await runJob(env, "reddit_post", () => hasSerpent(env) ? collectRedditDaily(env) : postRedditTasks(env, "daily"));
   await runJob(env, "youtube", () => collectYoutube(env));
   await runJob(env, "content_analysis", () => collectContentAnalysis(env));
 }
@@ -34,8 +36,16 @@ async function tick(env: Env) {
   // Time budget: finish well inside the 10-minute gap so runs never pile up
   const start = Date.now();
   await runJob(env, "serp_collect", () => collectSerpTasks(env));
-  await runJob(env, "reddit_insights", () => analyseRedditThreads(env, 144, start + 4 * 60000));
-  await runJob(env, "enrich", () => enrichItems(env, 400, start + 8 * 60000));
+  if (hasSerpent(env)) {
+    // Subreddit feeds every few hours (upvote and comment snapshots), comment threads every run
+    const last = await env.DB.prepare(`SELECT MAX(started_at) AS t FROM runs WHERE project=?1 AND job='reddit_feeds' AND status='ok'`).bind(PROJECT.id).first<any>();
+    if (!last?.t || Date.parse(last.t) < Date.now() - (TAX.REDDIT_FEEDS_EVERY_HOURS * 3600000 - 5 * 60000)) {
+      await runJob(env, "reddit_feeds", () => collectRedditFeeds(env, start + 90000));
+    }
+    await runJob(env, "reddit_comments", () => collectRedditComments(env, start + 150000));
+  }
+  await runJob(env, "reddit_insights", () => analyseRedditThreads(env, 144, start + 5 * 60000));
+  await runJob(env, "enrich", () => enrichItems(env, 400, start + 8.5 * 60000));
   // One-off themes rebuild (queued by a migration), after the routine work
   if ((await env.DB.prepare(`DELETE FROM pending_jobs WHERE job='reddit_themes_now'`).run()).meta?.changes) {
     await runJob(env, "reddit_themes", () => buildRedditThemes(env));
@@ -44,7 +54,10 @@ async function tick(env: Env) {
   if (await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job='reddit_themes_when_ready'`).first()) {
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM reddit_threads WHERE insight_done=0`).first<any>();
     const pendingSearches = await env.DB.prepare(`SELECT COUNT(*) AS n FROM serp_tasks WHERE fetched_at IS NULL AND kind LIKE 'reddit%'`).first<any>();
-    if ((left?.n || 0) <= 5 && !pendingSearches?.n) {
+    const pullWaiting = await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job='reddit_api_now'`).first();
+    // After the first Serpent pull, wait for its comment threads too (one ceiling's worth at most)
+    const commentsLeft = hasSerpent(env) ? await env.DB.prepare(`SELECT COUNT(*) AS n FROM reddit_threads WHERE comments_fetched_at IS NULL AND posts_count >= ?1 AND last_seen >= ?2`).bind(TAX.REDDIT_COMMENTS_MIN, new Date(Date.now() - 86400000).toISOString()).first<any>() : null;
+    if ((left?.n || 0) <= 5 && !pendingSearches?.n && !pullWaiting && (commentsLeft?.n || 0) <= 20) {
       await env.DB.prepare(`DELETE FROM pending_jobs WHERE job='reddit_themes_when_ready'`).run();
       await runJob(env, "reddit_themes", () => buildRedditThemes(env));
     }
@@ -74,9 +87,13 @@ async function runPending(env: Env) {
       return { ...s, note: r.note };
     }),
     reddit_now: () => runJob(env, "reddit_post", () => postRedditTasks(env, "full")),
+    reddit_api_now: () => runJob(env, "reddit_post", () => collectRedditNow(env)),
 
   };
+  // Jobs that wait for something before they can run (left queued until then)
+  const ready: Record<string, () => boolean> = { reddit_api_now: () => hasSerpent(env) };
   for (const name of Object.keys(jobs)) {
+    if (ready[name] && !ready[name]()) continue;
     const r = await env.DB.prepare(`DELETE FROM pending_jobs WHERE job=?1`).bind(name).run();
     if (r.meta?.changes) await jobs[name]();
   }
@@ -89,6 +106,7 @@ async function morning(env: Env) {
   await runJob(env, "brief", () => buildBrief(env));
   await runJob(env, "reddit_themes", () => buildRedditThemes(env));
   await runJob(env, "health", () => healthJob(env));
+  if (new Date().getUTCDate() === 1) await runJob(env, "reddit_prune", () => pruneReddit(env));
 }
 
 function authorised(req: Request, env: Env): boolean {
@@ -127,7 +145,9 @@ export default {
           paa: () => runJob(env, "serp_post", () => postSerpTasks(env, true)),
           rollup_all: () => runJob(env, "rollup", () => rollup(env, 400)),
           health: () => runJob(env, "health", () => healthJob(env)),
-          reddit: () => runJob(env, "reddit_post", () => postRedditTasks(env, "full")),
+          reddit: () => runJob(env, "reddit_post", () => hasSerpent(env) ? collectRedditNow(env) : postRedditTasks(env, "full")),
+          reddit_feeds: () => runJob(env, "reddit_feeds", () => collectRedditFeeds(env)),
+          reddit_comments: () => runJob(env, "reddit_comments", () => collectRedditComments(env)),
           reddit_insights: () => runJob(env, "reddit_insights", () => analyseRedditThreads(env)),
           reddit_themes: () => runJob(env, "reddit_themes", () => buildRedditThemes(env)),
         };
