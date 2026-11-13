@@ -84,6 +84,10 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0010_reddit_now",
     sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('reddit_backfill_items', datetime('now')), ('reddit_now', datetime('now')), ('reddit_themes_when_ready', datetime('now'))`],
   },
+  {
+    name: "0011_insight_attempts",
+    sql: [`ALTER TABLE reddit_threads ADD COLUMN insight_attempts INTEGER DEFAULT 0`],
+  },
 ];
 
 let checked = false;

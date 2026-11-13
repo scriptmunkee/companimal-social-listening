@@ -40,7 +40,7 @@ async function tick(env: Env) {
   if (await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job='reddit_themes_when_ready'`).first()) {
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM reddit_threads WHERE insight_done=0`).first<any>();
     const pendingSearches = await env.DB.prepare(`SELECT COUNT(*) AS n FROM serp_tasks WHERE fetched_at IS NULL AND kind LIKE 'reddit%'`).first<any>();
-    if (!left?.n && !pendingSearches?.n) {
+    if ((left?.n || 0) <= 5 && !pendingSearches?.n) {
       await env.DB.prepare(`DELETE FROM pending_jobs WHERE job='reddit_themes_when_ready'`).run();
       await runJob(env, "reddit_themes", () => buildRedditThemes(env));
     }

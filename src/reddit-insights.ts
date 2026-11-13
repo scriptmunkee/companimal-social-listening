@@ -32,7 +32,7 @@ ${batch.map((t) => JSON.stringify({ id: t.post_id, subreddit: `r/${t.subreddit}`
 
 /** Analyse threads that have no insight yet. Runs every 10 minutes; cheap when there's nothing new. */
 export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER_RUN, deadline = Date.now() + 4 * 60000) {
-  const rows = (await env.DB.prepare(`SELECT post_id, subreddit, url, title, snippet, posts_count FROM reddit_threads WHERE project=?1 AND insight_done=0 ORDER BY COALESCE(posts_count,0) DESC, last_seen DESC LIMIT ?2`).bind(PROJECT.id, limit).all<any>()).results || [];
+  const rows = (await env.DB.prepare(`SELECT post_id, subreddit, url, title, snippet, posts_count, COALESCE(insight_attempts,0) AS attempts FROM reddit_threads WHERE project=?1 AND insight_done=0 ORDER BY COALESCE(posts_count,0) DESC, last_seen DESC LIMIT ?2`).bind(PROJECT.id, limit).all<any>()).results || [];
   if (!rows.length) return { added: 0, seen: 0, note: "nothing new" };
   const out = new Map<string, any>();
   let model = "heuristic";
@@ -54,7 +54,11 @@ export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER
     const r = out.get(t.post_id);
     const ukSub = /^(askuk|casualuk|unitedkingdom|uk)$/i.test(t.subreddit || "");
     const ruleRegion = ukSub ? "uk" : regionOf(`${t.title} ${t.snippet}`, t.url, `r/${t.subreddit}`, null);
-    if (!r && env.AI && env.MOCK !== "1") continue; // AI failed for this one: leave it for the next run
+    if (!r && env.AI && env.MOCK !== "1" && t.attempts < 2) {
+      // AI skipped or failed on this one: try again next run (rules-based reading after 3 tries)
+      stmts.push(env.DB.prepare(`UPDATE reddit_threads SET insight_attempts=COALESCE(insight_attempts,0)+1 WHERE post_id=?1`).bind(t.post_id));
+      continue;
+    }
     const h = heuristic(t.title || "", t.snippet || "");
     const ins = r ? {
       kind: r.kind, theme: clean(r.theme, 60), pain_point: clean(r.pain_point, 240), need: clean(r.need, 80),
@@ -71,7 +75,7 @@ export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER
     stmts.push(env.DB.prepare(`UPDATE reddit_threads SET insight_done=1 WHERE post_id=?1`).bind(t.post_id));
   }
   for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));
-  return { added: stmts.length / 2, seen: rows.length, note: `ai=${ai}` };
+  return { added: rows.length, seen: rows.length, note: `ai=${ai}` };
 }
 
 /** Group the last 7 days of threads into conversation themes. Daily snapshot, kept for trend history. */
