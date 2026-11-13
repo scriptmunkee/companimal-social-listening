@@ -35,16 +35,21 @@ Every morning a health check looks at the last 26 hours. If any job failed, didn
 
 ## Dashboard
 
-Light mode, Companimal palette. Filter every view by audience: Buyers, Breeders, Rescues, Owners.
+Server-rendered from `src/dashboard/` (no build step): `ui.ts` holds the design tokens, page shell and components, `views.ts` the pages, `data.ts` read-only query helpers, `client.ts` the small client script. Light mode, Companimal palette, Fraunces with Instrument Sans and JetBrains Mono.
 
-- **Today**: brief, KPIs, rising topics, top unanswered questions
-- **Question bank**: every extracted question, grouped and scored, searchable
-- **Rising topics**: last 7 days against each topic's own 4-week baseline (switches on after 3 weeks of data)
-- **Content gaps**: topic coverage against the sitemap
-- **Myths and claims**: candidates for Dog Data Library articles
-- **Sources and coverage**: best communities, and every collector run with its cost
+Every view keeps the **audience** (`?lens=buyer|breeder|rescue|owner`) and **region** (`?region=all`, default UK only) filters.
 
-"Send to pipeline" adds an opportunity to `pipeline_queue` (readable at `/api/pipeline`) ready to feed the Content Ledger.
+- **Today** (`/`): lead idea from the morning brief with the communities asking it, the rest of the brief, KPIs, rising topics with 35-day sparklines, top unanswered questions, claims to fact-check, recent pipeline sends
+- **Questions** (`/questions`): every grouped question with search, topic, period, coverage and sort filters, 50 a page. Click a question for the detail drawer (every source post, related questions as H2 candidates, matched Companimal URL); `/q?topic=…&q=…` is the same detail as a page
+- **Rising** (`/rising`): last 7 days against each topic's 4-week average; shows a "day X of 21" state until the baseline exists
+- **Topic pages** (`/topics/{id}`): 90-day daily trend, top questions, myths, best communities, what people post
+- **Gaps** (`/gaps`): coverage by topic against the sitemap, biggest gaps
+- **Myths** (`/myths`): claims grouped and counted, with the posts behind them
+- **Seasonality** (`/seasonality`): week-of-year grid per topic; reliable after 12 months of collection
+- **Pipeline** (`/pipeline`): everything sent with "Send to pipeline"
+- **Sources** (`/sources`): spend, best communities, UK YouTube channels, paginated run log
+
+Keyboard: `j`/`k` move through questions, `o` opens, `s` sends to the pipeline, `/` searches, `g` then `t`/`q`/`r`/`m` jumps between views, `?` lists shortcuts.
 
 ## Changing what it tracks
 
@@ -55,6 +60,10 @@ Edit `config/taxonomy.ts` and bump `QUERY_VERSION`. Each version is stored in `q
 All behind the dashboard password (HTTP basic auth, any username).
 
 - `GET /api/opportunities?days=30&lens=breeder`
+- `GET /api/question?topic=scams-fraud&q=…&days=90` (posts behind one question, related questions)
+- `GET /api/topic?topic=health&days=90`
+- `GET /api/seasonality`
+- `GET /api/myths?topic=health`
 - `GET /api/rising?lens=buyer`
 - `GET /api/pipeline`
 - `GET /api/health`

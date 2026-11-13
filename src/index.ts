@@ -4,11 +4,12 @@ import { Env, runJob, recordQueryVersion, nowIso, saveItems, withLock } from "./
 import { postSerpTasks, collectSerpTasks, collectContentAnalysis } from "./collectors/dataforseo";
 import { postRedditTasks, backfillRedditItems } from "./collectors/reddit";
 import { analyseRedditThreads, buildRedditThemes } from "./reddit-insights";
-import { viewReddit, redditThreadsApi, redditThemesApi } from "./dashboard/reddit";
+import { redditThreadsApi, redditThemesApi } from "./dashboard/reddit";
 import { collectYoutube } from "./collectors/youtube";
 import { enrichItems, refreshSitemap } from "./enrich";
 import { rollup, buildBrief, opportunities, risingTopics } from "./analysis";
-import { viewToday, viewQuestions, viewRising, viewGaps, viewMyths, viewSources } from "./dashboard/views";
+import { renderPage, notFoundPage } from "./dashboard/views";
+import { questionDetail, topicDetail, seasonality, mythGroups } from "./dashboard/data";
 import { ensureSchema } from "./migrations";
 import { healthJob, checkHealth } from "./health";
 
@@ -139,14 +140,26 @@ export default {
       if (url.pathname === "/api/reddit/themes") return json(await redditThemesApi(env));
       if (url.pathname === "/api/pipeline") return json((await env.DB.prepare(`SELECT * FROM pipeline_queue WHERE project=?1 ORDER BY created_at DESC LIMIT 100`).bind(PROJECT.id).all()).results);
 
-      switch (url.pathname) {
-        case "/": return html(await viewToday(env, lens, region));
-        case "/questions": return html(await viewQuestions(env, url, lens, region));
-        case "/rising": return html(await viewRising(env, lens, region));
-        case "/gaps": return html(await viewGaps(env, lens, region));
-        case "/myths": return html(await viewMyths(env, lens, region));
-        case "/sources": return html(await viewSources(env, lens, region));
-        case "/reddit": return html(await viewReddit(env, url, lens, region));
+      // Read-only JSON for the dashboard
+      if (url.pathname === "/api/question") {
+        const topic = url.searchParams.get("topic"), q = url.searchParams.get("q");
+        if (!topic || !q) return json({ error: "topic and q required" }, 400);
+        return json(await questionDetail(env, topic, q, Number(url.searchParams.get("days") || 90), lens, region));
+      }
+      if (url.pathname === "/api/topic") {
+        const topic = url.searchParams.get("topic");
+        if (!topic) return json({ error: "topic required" }, 400);
+        return json(await topicDetail(env, topic, lens, region, Number(url.searchParams.get("days") || 90)));
+      }
+      if (url.pathname === "/api/seasonality") return json(await seasonality(env, lens, region));
+      if (url.pathname === "/api/myths") return json(await mythGroups(env, lens, region, url.searchParams.get("topic") || undefined));
+      if (url.pathname.startsWith("/api/")) return json({ error: "not found" }, 404);
+
+      if (req.method === "GET") {
+        if (url.pathname === "/topics") return Response.redirect(new URL(`/rising${url.search}`, url).toString(), 302);
+        const page = await renderPage(env, url, lens, region);
+        if (page) return html(page);
+        return new Response(await notFoundPage(env, url, lens, region), { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
       }
       return new Response("Not found", { status: 404 });
     } catch (e: any) {

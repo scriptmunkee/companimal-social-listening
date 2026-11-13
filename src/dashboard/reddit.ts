@@ -2,7 +2,8 @@ import { PROJECT, TOPICS } from "../../config/taxonomy";
 import { Env, daysAgo } from "../lib";
 import { RegionFilter } from "../analysis";
 import { threadScore } from "../collectors/reddit";
-import { layout, esc, topicLabel } from "./views";
+import { esc, fmt, pct, href, keepFilters, topicTag, dateShort, meter, empty, notice, eyebrow, section, sendButton, segmented, pager, Ctx } from "./ui";
+import { queuedSet, queueKey } from "./data";
 
 const KIND_LABELS: Record<string, string> = {
   question: "Question", advice_request: "Asking for advice", vent: "Venting", story: "Story", celebration: "Celebrating",
@@ -39,19 +40,21 @@ function age(iso: string | null) {
   return `${Math.round(d / 365)}y`;
 }
 
-const subLink = (url: URL, key: string, val: string | null) => {
-  const u = new URL(url.toString());
-  if (val === null) u.searchParams.delete(key); else u.searchParams.set(key, val);
-  return `${u.pathname}${u.search}`;
-};
+export const KINDS = KIND_LABELS;
 
-export async function viewReddit(env: Env, url: URL, lens?: string, region: RegionFilter = "uk") {
-  const days = Number(url.searchParams.get("days") || 7);
+const SENTIMENT: Record<string, string> = { negative: "Mostly negative", positive: "Mostly positive", mixed: "Mixed feelings", neutral: "Neutral" };
+
+/** Reddit view: themes, ranked threads, pain points, angles, feelings, subreddits. */
+export async function viewReddit(env: Env, url: URL, ctx: Ctx): Promise<{ title: string; body: string }> {
+  const days = [7, 30, 90].includes(Number(url.searchParams.get("days"))) ? Number(url.searchParams.get("days")) : 7;
   const sub = url.searchParams.get("sub") || undefined;
   const kind = url.searchParams.get("kind") || undefined;
   const topic = url.searchParams.get("topic") || undefined;
-  const sort = url.searchParams.get("sort") || "hot";
-  const all = await loadThreads(env, { days, lens, region, sub, kind, topic });
+  const sort = ["discussed", "new"].includes(url.searchParams.get("sort") || "") ? url.searchParams.get("sort")! : "hot";
+  const params = { days: days === 7 ? undefined : days, sub, kind, topic, sort: sort === "hot" ? undefined : sort };
+  const link = (over: Record<string, string | number | undefined>) => href(ctx, "/reddit", { ...params, ...over });
+
+  const [all, queued] = await Promise.all([loadThreads(env, { days, lens: ctx.lens, region: ctx.region, sub, kind, topic }), queuedSet(env)]);
   const threads = [...all].sort((a, b) =>
     sort === "discussed" ? (b.posts_count || 0) - (a.posts_count || 0)
     : sort === "new" ? Date.parse(b.created_at || b.first_seen) - Date.parse(a.created_at || a.first_seen)
@@ -63,12 +66,12 @@ export async function viewReddit(env: Env, url: URL, lens?: string, region: Regi
   const totals = await env.DB.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN posts_count IS NOT NULL THEN 1 ELSE 0 END) AS withc, COUNT(DISTINCT subreddit) AS subs, SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS new24 FROM reddit_threads WHERE project=?1`).bind(PROJECT.id, new Date(Date.now() - 86400000).toISOString()).first<any>();
   const pending = await env.DB.prepare(`SELECT COUNT(*) AS n FROM reddit_threads WHERE insight_done=0`).first<any>();
 
-  // Subreddit leaderboard and mixes
+  // Subreddit leaderboard and mixes (from the threads in view)
   const subs = new Map<string, { n: number; comments: number; withc: number; questions: number; emotional: number; themes: Map<string, number> }>();
   const emotions = new Map<string, number>();
   for (const t of all) {
     const s = subs.get(t.subreddit) || { n: 0, comments: 0, withc: 0, questions: 0, emotional: 0, themes: new Map() };
-    s.n++; if (t.posts_count !== null) { s.comments += t.posts_count; s.withc++; }
+    s.n++; if (t.posts_count !== null && t.posts_count !== undefined) { s.comments += t.posts_count; s.withc++; }
     if (["question", "advice_request", "recommendation_request"].includes(t.kind || "")) s.questions++;
     if (["vent", "story", "celebration"].includes(t.kind || "")) s.emotional++;
     if (t.theme) s.themes.set(t.theme, (s.themes.get(t.theme) || 0) + 1);
@@ -76,59 +79,71 @@ export async function viewReddit(env: Env, url: URL, lens?: string, region: Regi
     if (t.emotion) emotions.set(t.emotion, (emotions.get(t.emotion) || 0) + 1);
   }
   const subRows = [...subs.entries()].sort((a, b) => b[1].n - a[1].n);
+  const subOptions = [...new Set([...subRows.map(([s]) => s), ...(sub ? [sub] : [])])];
   const emoRows = [...emotions.entries()].filter(([e]) => e !== "neutral").sort((a, b) => b[1] - a[1]);
-  const emoMax = Math.max(1, ...emoRows.map(([, n]) => n));
-  const pains = threads.filter((t) => t.pain_point).slice(0, 14);
-  const angles = [...new Map(threads.filter((t) => t.content_angle).map((t) => [t.content_angle!.toLowerCase(), t])).values()].slice(0, 12);
+  const emoTotal = emoRows.reduce((a, [, n]) => a + n, 0);
+  const pains = threads.filter((t) => t.pain_point).slice(0, 10);
+  const angles = [...new Map(threads.filter((t) => t.content_angle).map((t) => [t.content_angle!.toLowerCase(), t])).values()].slice(0, 10);
 
-  const chip = (label: string, href: string, on: boolean) => `<a href="${esc(href)}" class="${on ? "on" : ""}">${esc(label)}</a>`;
-  const body = `<h1>Reddit</h1>
-<p class="sub">What dog people on Reddit are talking about, from Google's index of Reddit. Comment counts come from Google's Discussions and forums results; comment text isn't available.${pending?.n ? ` <b>${pending.n} threads still being analysed.</b>` : ""}</p>
-<div class="grid">
-<div class="card kpi"><div class="n">${(totals?.n || 0).toLocaleString("en-GB")}</div><div class="l">Threads tracked across ${totals?.subs || 0} subreddits</div></div>
-<div class="card kpi"><div class="n">${(totals?.new24 || 0).toLocaleString("en-GB")}</div><div class="l">New in the last 24 hours</div></div>
-<div class="card kpi"><div class="n">${(totals?.withc || 0).toLocaleString("en-GB")}</div><div class="l">With comment counts</div></div>
-<div class="card kpi"><div class="n">${all.length.toLocaleString("en-GB")}</div><div class="l">Relevant threads in view (${days} days)</div></div>
-</div>
-
-<h2>What people are talking about${themeDate?.d ? ` <span class="muted" style="font:400 13px Inter">(${esc(themeDate.d)})</span>` : ""}</h2>
-${themes.length ? `<div class="grid">${themes.map((t: any) => {
+  // Themes: one lead, the rest as a ranked list
+  const themeCard = (t: any, lead: boolean, rank = 1) => {
     const ids: string[] = JSON.parse(t.thread_ids_json || "[]");
-    const ex = ids.map((id) => byId.get(id)).filter(Boolean).slice(0, 3) as ThreadRow[];
+    const ex = ids.map((id) => byId.get(id)).filter(Boolean).slice(0, lead ? 3 : 2) as ThreadRow[];
     const ideas: string[] = JSON.parse(t.ideas_json || "[]");
-    return `<div class="card idea"><span class="tag ${t.sentiment === "negative" ? "terra" : t.sentiment === "positive" ? "forest" : ""}">${t.thread_count} threads · ${esc(t.sentiment)}</span><h3>${esc(t.theme)}</h3><p>${esc(t.summary)}</p>${t.why ? `<p><b>Why it matters:</b> ${esc(t.why)}</p>` : ""}${ideas.length ? `<ul>${ideas.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}${ex.length ? `<p style="margin-top:8px">${ex.map((e) => `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc((e.title || "").slice(0, 70))}</a>`).join("<br>")}</p>` : ""}</div>`;
-  }).join("")}</div>` : `<div class="card empty">Themes are built once the first batch of threads is analysed.</div>`}
+    const tTopic = ex.find((e) => e.topic)?.topic || "other";
+    const meta = `<div class="qmeta" style="margin:0"><span class="tag">${fmt(t.thread_count)} threads</span><span>${esc(SENTIMENT[t.sentiment] || t.sentiment || "")}</span></div>`;
+    if (!lead) return `<li><span class="n">${String(rank).padStart(2, "0")}</span><div><span class="t">${esc(t.theme)}</span>${t.summary && !/^\d+ threads/.test(t.summary) ? `<p>${esc(t.summary)}</p>` : ""}<div style="margin-top:6px">${meta}</div></div></li>`;
+    return `<article class="panel hero c-7"><div>${eyebrow("Biggest conversation this week")}${meta}</div><h2>${esc(t.theme)}</h2><p class="why">${esc(t.summary || "")}</p>
+${t.why ? `<div><p class="eyebrow">Why it matters</p><p style="margin:0;color:var(--ink-2)">${esc(t.why)}</p></div>` : ""}
+${ideas.length ? `<div><p class="eyebrow">Article ideas</p><ol class="h2list">${ideas.slice(0, 4).map((i, n) => `<li><span>${String(n + 1).padStart(2, "0")}</span><div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><span style="font:inherit;color:inherit">${esc(i)}</span>${sendButton(tTopic, i, queued.has(queueKey(tTopic, i)), true)}</div></li>`).join("")}</ol></div>` : ""}
+${ex.length ? `<div><p class="eyebrow">Threads behind it</p><ul class="quotes">${ex.map((e) => `<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc((e.title || "Untitled thread").slice(0, 110))}</a><span>r/${esc(e.subreddit)}${e.posts_count ? ` · ${fmt(e.posts_count)} comments` : ""}</span></li>`).join("")}</ul></div>` : ""}</article>`;
+  };
+  const restThemes = themes.slice(1, 6);
+  const themesHtml = themes.length ? `<div class="bento">${themeCard(themes[0], true)}<section class="panel queue c-5">${eyebrow("Also being talked about")}${restThemes.length ? `<ol>${restThemes.map((t: any, i: number) => themeCard(t, false, i + 2)).join("")}</ol>` : `<p class="muted" style="margin:12px 0 0">One theme so far.</p>`}</section></div>`
+    : empty("Themes are on their way", "They're written once the first batch of threads has been analysed.");
 
-<h2>Threads</h2>
-<div class="bar"><div class="lens">${chip("Hot right now", subLink(url, "sort", "hot"), sort === "hot")}${chip("Most discussed", subLink(url, "sort", "discussed"), sort === "discussed")}${chip("Newest", subLink(url, "sort", "new"), sort === "new")}</div>
-<div class="lens">${[7, 30, 90].map((d) => chip(`${d} days`, subLink(url, "days", String(d)), days === d)).join("")}</div></div>
-<div class="lens" style="margin-bottom:10px">${chip("All subreddits", subLink(url, "sub", null), !sub)}${subRows.slice(0, 12).map(([s]) => chip(`r/${s}`, subLink(url, "sub", s), sub?.toLowerCase() === s.toLowerCase())).join("")}</div>
-<div class="lens" style="margin-bottom:14px">${chip("All kinds", subLink(url, "kind", null), !kind)}${Object.entries(KIND_LABELS).map(([k, l]) => chip(l, subLink(url, "kind", k), kind === k)).join("")}</div>
-${threads.length ? `<table><tr><th class="num">Score</th><th>Thread</th><th>Subreddit</th><th class="num">Age</th><th class="num">Comments</th><th class="num">Seen</th><th>What it's about</th><th>Content angle</th><th></th></tr>
-${threads.slice(0, 150).map((t) => `<tr>
-<td class="num"><b>${t.score}</b></td>
-<td style="max-width:340px"><a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title || "(untitled)")}</a>${t.snippet ? `<div class="muted" style="font-size:13px">${esc(t.snippet.slice(0, 180))}${t.snippet.length > 180 ? "…" : ""}</div>` : ""}</td>
-<td><a href="${esc(subLink(url, "sub", t.subreddit))}">r/${esc(t.subreddit)}</a></td>
-<td class="num">${age(t.created_at || t.first_seen)}</td>
-<td class="num">${t.posts_count ?? "–"}${t.growth ? ` <span class="ok">+${t.growth}</span>` : ""}</td>
-<td class="num">${t.seen_count}</td>
-<td style="max-width:260px">${t.kind ? `<span class="tag">${esc(KIND_LABELS[t.kind] || t.kind)}</span> ` : ""}${t.theme ? `<b>${esc(t.theme)}</b>` : `<span class="muted">Analysing…</span>`}${t.pain_point ? `<div class="muted" style="font-size:13px">${esc(t.pain_point)}</div>` : ""}${t.emotion && t.emotion !== "neutral" ? `<div class="muted" style="font-size:12px">Feeling ${esc(t.emotion)}${t.need ? ` · wants ${esc(t.need)}` : ""}</div>` : ""}</td>
-<td style="max-width:240px">${t.content_angle ? esc(t.content_angle) : ""}</td>
-<td>${t.content_angle ? `<button class="btn" data-send data-topic="${esc(t.topic || "other")}" data-q="${esc(t.content_angle)}">Send to pipeline</button>` : ""}</td>
-</tr>`).join("")}</table>${threads.length > 150 ? `<p class="muted">Showing 150 of ${threads.length}. Narrow by subreddit or kind.</p>` : ""}` : `<div class="card empty">No threads yet for these filters. Searches are queued; results arrive within the hour.</div>`}
+  // Threads toolbar and table
+  const opt = (v: string, label: string, cur: string | undefined) => `<option value="${esc(v)}"${v === (cur || "") ? " selected" : ""}>${esc(label)}</option>`;
+  const toolbar = `<div class="toolbar">${segmented("Sort", [{ href: link({ sort: undefined }), label: "Hot right now", on: sort === "hot" }, { href: link({ sort: "discussed" }), label: "Most discussed", on: sort === "discussed" }, { href: link({ sort: "new" }), label: "Newest", on: sort === "new" }])}
+${segmented("Period", [7, 30, 90].map((d) => ({ href: link({ days: d === 7 ? undefined : d }), label: `${d} days`, on: days === d })))}
+<form method="get" action="/reddit" data-auto style="display:flex;gap:10px;flex-wrap:wrap">${keepFilters(ctx)}${days !== 7 ? `<input type="hidden" name="days" value="${days}">` : ""}${sort !== "hot" ? `<input type="hidden" name="sort" value="${esc(sort)}">` : ""}${topic ? `<input type="hidden" name="topic" value="${esc(topic)}">` : ""}
+<label class="field"><span class="sr">Subreddit</span><select name="sub">${opt("", "All subreddits", sub)}${subOptions.map((s) => opt(s, `r/${s}`, sub)).join("")}</select></label>
+<label class="field"><span class="sr">Kind of post</span><select name="kind">${opt("", "All kinds of post", kind)}${Object.entries(KIND_LABELS).map(([k, l]) => opt(k, l, kind)).join("")}</select></label>
+<noscript><button class="btn-line">Apply</button></noscript></form></div>`;
+  const per = 50, pages = Math.max(1, Math.ceil(threads.length / per));
+  const page = Math.min(Math.max(1, Math.floor(Number(url.searchParams.get("page")) || 1)), pages);
+  const slice = threads.slice((page - 1) * per, page * per);
+  const maxScore = Math.max(1, ...threads.map((t) => t.score));
+  const rows = slice.map((t, i) => `<tr data-row tabindex="0">
+<td class="rank">${String((page - 1) * per + i + 1).padStart(2, "0")}</td>
+<td class="qcell"><a class="qlink" data-ext href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title || "Untitled thread")}</a>${t.snippet ? `<p class="snip">${esc(t.snippet.slice(0, 180))}${t.snippet.length > 180 ? "…" : ""}</p>` : ""}<div class="qmeta"><a class="tag" href="${link({ sub: t.subreddit, page: undefined })}">r/${esc(t.subreddit)}</a><span>${age(t.created_at || t.first_seen)} old</span><span>Seen ${fmt(t.seen_count)} ${t.seen_count === 1 ? "time" : "times"}</span><span class="m-only">${t.posts_count !== null && t.posts_count !== undefined ? `${fmt(t.posts_count)} comments${t.growth ? `, +${fmt(t.growth)}` : ""} · ` : ""}score ${t.score.toFixed(1)}</span></div></td>
+<td class="num d-only">${t.posts_count !== null && t.posts_count !== undefined ? fmt(t.posts_count) : `<span class="muted">n/a</span>`}${t.growth ? `<div class="up" style="font-size:12.5px">+${fmt(t.growth)}</div>` : ""}</td>
+<td class="about">${t.kind ? `<span class="tag">${esc(KIND_LABELS[t.kind] || t.kind)}</span>` : ""}${t.theme ? `<div class="theme">${esc(t.theme)}</div>` : `<div class="muted">Being analysed</div>`}${t.pain_point ? `<div class="muted small">${esc(t.pain_point)}</div>` : ""}${t.emotion && t.emotion !== "neutral" ? `<div class="muted small">Feeling ${esc(t.emotion)}${t.need ? `; wants ${esc(t.need)}` : ""}</div>` : ""}</td>
+<td class="angle">${t.content_angle ? `<div><b class="m-only" style="font-weight:600">Angle: </b>${esc(t.content_angle)}</div>` : ""}</td>
+<td class="num score d-only">${t.score.toFixed(1)}${meter(t.score / maxScore)}</td>
+<td class="act">${t.content_angle ? sendButton(t.topic || "other", t.content_angle, queued.has(queueKey(t.topic || "other", t.content_angle)), true) : ""}</td></tr>`).join("");
+  const table = slice.length ? `<div class="tbl-wrap"><table class="q reddit"><thead><tr><th class="rank"><span class="sr">Rank</span></th><th>Thread</th><th class="num d-only">Comments</th><th>What it's about</th><th>Content angle</th><th class="num d-only">Score</th><th><span class="sr">Action</span></th></tr></thead><tbody>${rows}</tbody></table></div>${pager(ctx, "/reddit", params, page, threads.length, per)}`
+    : empty(sub || kind || topic ? "No threads for these filters" : "No threads yet", sub || kind || topic ? `Try a longer period or <a href="${href(ctx, "/reddit")}">clear the filters</a>.` : "Searches are queued; results arrive within the hour.");
 
-<div class="grid" style="margin-top:28px;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))">
-<div class="card"><h2 style="margin-top:0">Pain points</h2>${pains.length ? `<ul style="padding-left:18px;margin:0">${pains.map((t) => `<li style="margin-bottom:6px">${esc(t.pain_point)} <a href="${esc(t.url)}" target="_blank" class="muted">↗</a> <span class="tag">${esc(topicLabel(t.topic || "other"))}</span></li>`).join("")}</ul>` : `<p class="muted">Appear once threads are analysed.</p>`}</div>
-<div class="card"><h2 style="margin-top:0">Content angles</h2>${angles.length ? `<ul style="padding-left:18px;margin:0">${angles.map((t) => `<li style="margin-bottom:6px">${esc(t.content_angle)} <span class="muted" style="font-size:12px">from r/${esc(t.subreddit)}${t.posts_count ? `, ${t.posts_count} comments` : ""}</span></li>`).join("")}</ul>` : `<p class="muted">Appear once threads are analysed.</p>`}</div>
-<div class="card"><h2 style="margin-top:0">How people feel</h2>${emoRows.length ? emoRows.map(([e, n]) => `<div style="display:flex;align-items:center;gap:8px;margin:4px 0;font-size:14px"><span style="width:96px">${esc(e[0].toUpperCase() + e.slice(1))}</span><span style="flex:1;background:var(--sand);border-radius:4px;height:10px"><span style="display:block;height:10px;border-radius:4px;background:var(--forest);width:${Math.round((n / emoMax) * 100)}%"></span></span><span class="muted" style="width:32px;text-align:right">${n}</span></div>`).join("") : `<p class="muted">Appears once threads are analysed.</p>`}</div>
-</div>
+  const lower = `<div class="bento" style="margin-top:8px">
+<section class="c-4">${section("Pain points")}${pains.length ? `<ul class="list">${pains.map((t) => `<li class="post"><p>${esc(t.pain_point)}</p><div class="post-h"><a href="${esc(t.url)}" target="_blank" rel="noopener">r/${esc(t.subreddit)} ↗</a>${t.topic ? topicTag(ctx, t.topic) : ""}</div></li>`).join("")}</ul>` : `<p class="muted">These appear once threads are analysed.</p>`}</section>
+<section class="c-5">${section("Content angles")}${angles.length ? `<ul class="list">${angles.map((t) => `<li class="post"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><p style="color:var(--ink)">${esc(t.content_angle)}</p>${sendButton(t.topic || "other", t.content_angle!, queued.has(queueKey(t.topic || "other", t.content_angle!)), true)}</div><div class="post-h"><span>From r/${esc(t.subreddit)}${t.posts_count ? `, ${fmt(t.posts_count)} comments` : ""}</span></div></li>`).join("")}</ul>` : `<p class="muted">These appear once threads are analysed.</p>`}</section>
+<section class="c-3">${section("How people feel")}${emoRows.length ? `<ul class="list">${emoRows.slice(0, 8).map(([e, n]) => `<li><div class="post-h" style="justify-content:space-between"><b>${esc(e[0].toUpperCase() + e.slice(1))}</b><span>${fmt(n)} · ${pct(n, emoTotal)}%</span></div>${meter(n / Math.max(1, emoRows[0][1]))}</li>`).join("")}</ul>` : `<p class="muted">This appears once threads are analysed.</p>`}</section></div>`;
 
-<h2>Subreddits</h2>
-${subRows.length ? `<table><tr><th>Subreddit</th><th class="num">Threads</th><th class="num">Avg comments</th><th class="num">Asking for help</th><th class="num">Stories and venting</th><th>Top theme</th></tr>${subRows.map(([s, v]) => {
+  const subsTable = subRows.length ? `<div class="tbl-wrap scroll"><table><thead><tr><th>Subreddit</th><th class="num">Threads</th><th class="num">Avg comments</th><th>Asking for help</th><th class="num">Stories and venting</th><th class="d-only">Top theme</th></tr></thead><tbody>${subRows.map(([s, v]) => {
     const top = [...v.themes.entries()].sort((a, b) => b[1] - a[1])[0];
-    return `<tr><td><a href="${esc(subLink(url, "sub", s))}">r/${esc(s)}</a></td><td class="num">${v.n}</td><td class="num">${v.withc ? Math.round(v.comments / v.withc) : "–"}</td><td class="num">${Math.round((v.questions / v.n) * 100)}%</td><td class="num">${Math.round((v.emotional / v.n) * 100)}%</td><td>${top ? esc(top[0]) : ""}</td></tr>`;
-  }).join("")}</table>` : `<div class="card empty">No subreddit data yet.</div>`}`;
-  return layout("/reddit", "Reddit", body, lens, region);
+    return `<tr><td class="name"><a class="qlink" href="${link({ sub: s, page: undefined })}">r/${esc(s)}</a></td><td class="num">${fmt(v.n)}</td><td class="num">${v.withc ? fmt(Math.round(v.comments / v.withc)) : `<span class="muted">n/a</span>`}</td><td style="min-width:140px"><div style="display:flex;gap:10px;align-items:center">${meter(v.questions / v.n)}<span>${pct(v.questions, v.n)}%</span></div></td><td class="num">${pct(v.emotional, v.n)}%</td><td class="d-only">${top ? esc(top[0]) : ""}</td></tr>`;
+  }).join("")}</tbody></table></div>` : empty("No subreddit data yet");
+
+  const body = `<div class="page-head"><div>${eyebrow("From Google's index of Reddit")}<h1>Reddit</h1><p class="lede">What dog people on Reddit are talking about. Comment counts come from Google's Discussions and forums results; the comments themselves aren't available, so themes are read from titles and snippets.</p></div></div>
+${pending?.n ? notice(`<b>${fmt(pending.n)} ${pending.n === 1 ? "thread is" : "threads are"} still being analysed.</b> Themes, pain points and angles fill in as they're read, every 10 minutes.`) : ""}
+<div class="kpis" style="margin-top:0"><div><div class="v">${fmt(totals?.n)}</div><div class="l">Threads tracked</div><div class="s">Across ${fmt(totals?.subs)} subreddits</div></div><div><div class="v">${fmt(totals?.new24)}</div><div class="l">New, 24 hours</div></div><div><div class="v">${fmt(totals?.withc)}</div><div class="l">With comment counts</div><div class="s">${pct(totals?.withc || 0, totals?.n || 0)}% of threads</div></div><div><div class="v">${fmt(all.length)}</div><div class="l">In view</div><div class="s">Last ${days} days${sub ? `, r/${esc(sub)}` : ""}</div></div></div>
+${section("What people are talking about", themeDate?.d ? `Themes for ${esc(dateShort(themeDate.d))}` : "")}${themesHtml}
+${section("Threads", `${fmt(threads.length)} in view`)}${toolbar}${table}
+<p class="hint d-only"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>o</kbd> open thread</span><span><kbd>s</kbd> send the angle to the pipeline</span></p>
+${lower}
+${section("Subreddits", `Last ${days} days`)}${subsTable}`;
+  return { title: "Reddit", body };
 }
 
 /** JSON for the front end: threads with insights and score. */
