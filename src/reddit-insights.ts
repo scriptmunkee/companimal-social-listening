@@ -1,6 +1,6 @@
 // AI reading of Reddit threads: what each one is really about, and the week's conversation themes.
 import { PROJECT, TOPICS, REDDIT_INSIGHTS_PER_RUN } from "../config/taxonomy";
-import { Env, nowIso, today, daysAgo, clean } from "./lib";
+import { Env, nowIso, today, daysAgo, clean, inWaves } from "./lib";
 import { runAi, regionOf, heuristic } from "./enrich";
 import { threadScore } from "./collectors/reddit";
 
@@ -31,19 +31,21 @@ ${batch.map((t) => JSON.stringify({ id: t.post_id, subreddit: `r/${t.subreddit}`
 }
 
 /** Analyse threads that have no insight yet. Runs every 10 minutes; cheap when there's nothing new. */
-export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER_RUN) {
+export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER_RUN, deadline = Date.now() + 4 * 60000) {
   const rows = (await env.DB.prepare(`SELECT post_id, subreddit, url, title, snippet, posts_count FROM reddit_threads WHERE project=?1 AND insight_done=0 ORDER BY COALESCE(posts_count,0) DESC, last_seen DESC LIMIT ?2`).bind(PROJECT.id, limit).all<any>()).results || [];
   if (!rows.length) return { added: 0, seen: 0, note: "nothing new" };
   const out = new Map<string, any>();
   let model = "heuristic";
   if (env.AI && env.MOCK !== "1") {
-    for (let i = 0; i < rows.length; i += 12) {
+    const batches: any[][] = [];
+    for (let i = 0; i < rows.length; i += 12) batches.push(rows.slice(i, i + 12));
+    await inWaves(batches, 4, deadline, async (batch) => {
       try {
-        const [arr, used] = await runAi(env, insightPrompt(rows.slice(i, i + 12)), 3500);
+        const [arr, used] = await runAi(env, insightPrompt(batch), 3500);
         for (const r of arr) if (r?.id && KINDS.includes(r.kind)) out.set(String(r.id), r);
         model = used;
       } catch (e) { console.error("reddit insight batch failed", String((e as any)?.message || e)); }
-    }
+    });
   }
   const validTopics = new Set(TOPICS.map((t) => t.id));
   const stmts: D1PreparedStatement[] = [];

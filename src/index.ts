@@ -26,13 +26,16 @@ async function dailyCollect(env: Env) {
 /** Every 10 minutes: pick up finished SERP tasks, enrich new items, read new Reddit threads. */
 async function hourly(env: Env) {
   // Skip if the previous run is still going, so rows are never processed twice
-  await withLock(env, "tick", 9 * 60, () => tick(env));
+  // The lock outlives the longest possible run (cron runs are capped at 15 minutes)
+  await withLock(env, "tick", 14 * 60, () => tick(env));
 }
 
 async function tick(env: Env) {
+  // Time budget: finish well inside the 10-minute gap so runs never pile up
+  const start = Date.now();
   await runJob(env, "serp_collect", () => collectSerpTasks(env));
-  await runJob(env, "enrich", () => enrichItems(env, 400));
-  await runJob(env, "reddit_insights", () => analyseRedditThreads(env));
+  await runJob(env, "reddit_insights", () => analyseRedditThreads(env, 144, start + 4 * 60000));
+  await runJob(env, "enrich", () => enrichItems(env, 400, start + 8 * 60000));
   // Reddit themes as soon as the thread backlog is analysed (one-off after a backfill)
   if (await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job='reddit_themes_when_ready'`).first()) {
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM reddit_threads WHERE insight_done=0`).first<any>();

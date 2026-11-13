@@ -106,20 +106,25 @@ export async function postSubredditTasks(env: Env) {
 export async function collectSerpTasks(env: Env) {
   const pending = await env.DB.prepare(`SELECT task_id, kind, query FROM serp_tasks WHERE fetched_at IS NULL AND project=?1 ORDER BY posted_at LIMIT 100`).bind(PROJECT.id).all<any>();
   let added = 0, seen = 0;
-  for (const t of pending.results || []) {
+  const list = pending.results || [];
+  // Fetch finished tasks six at a time, then store them one by one
+  const fetched = new Map<string, any>();
+  if (env.MOCK !== "1") {
+    for (let i = 0; i < list.length; i += 6) {
+      await Promise.all(list.slice(i, i + 6).map(async (t: any) => {
+        try { fetched.set(t.task_id, await dfs(env, `serp/google/organic/task_get/advanced/${t.task_id}`)); } catch (e: any) { fetched.set(t.task_id, { error: String(e?.message || e) }); }
+      }));
+    }
+  }
+  for (const t of list) {
     let result: any;
     let raw: any;
     if (env.MOCK === "1") {
       raw = mockSerp(t.kind, t.query);
       result = raw.tasks[0].result[0];
     } else {
-      try {
-        raw = await dfs(env, `serp/google/organic/task_get/advanced/${t.task_id}`);
-      } catch (e: any) {
-        // 40602 = task in queue; leave it for the next run
-        if (String(e.message).includes("in Queue") || String(e.message).includes("Task In")) continue;
-        throw e;
-      }
+      raw = fetched.get(t.task_id);
+      if (!raw || raw.error) continue; // still queued or a transient error: try again next run
       const task = raw.tasks?.[0];
       if (!task || task.status_code !== 20000) continue;
       result = task.result?.[0];

@@ -129,3 +129,18 @@ export async function withLock<T>(env: Env, name: string, ttlSeconds: number, fn
   if (!r.meta?.changes) return null;
   try { return await fn(); } finally { await env.DB.prepare(`DELETE FROM locks WHERE name=?1`).bind(name).run(); }
 }
+
+/**
+ * Run async work on batches, `concurrency` at a time, stopping before `deadline` (ms epoch).
+ * Returns the indexes of batches that completed, so callers only finalise finished work.
+ */
+export async function inWaves<T>(batches: T[], concurrency: number, deadline: number, fn: (b: T) => Promise<void>): Promise<Set<number>> {
+  const done = new Set<number>();
+  for (let i = 0; i < batches.length; i += concurrency) {
+    if (Date.now() > deadline) break;
+    const wave = batches.slice(i, i + concurrency);
+    const res = await Promise.allSettled(wave.map((b) => fn(b)));
+    res.forEach((r, j) => { if (r.status === "fulfilled") done.add(i + j); });
+  }
+  return done;
+}
