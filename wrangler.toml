@@ -2,6 +2,8 @@ name = "companimal-social-listening"
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = false
 
 [triggers]
 # 02:00 collect, hourly enrich, 06:30 rollup + brief (UTC)
@@ -10,7 +12,7 @@ crons = ["0 2 * * *", "15 * * * *", "30 6 * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "companimal-social-listening"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "505f8092-8d1a-4858-ad8f-c28f801ae974"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
