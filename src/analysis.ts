@@ -94,9 +94,9 @@ Return ONLY a JSON array.
 Questions (topic | question | mentions | engagement):
 ${opps.slice(0, 20).map((o) => `${o.topic} | ${o.question} | ${o.count} | ${o.engagement}`).join("\n")}
 Rising topics: ${rising.map((r) => `${r.label} (x${r.ratio.toFixed(1)})`).join(", ")}`;
-      const [text, used] = await runAi(env, prompt, 1500, 0.2);
-      const m = text.match(/\[[\s\S]*\]/);
-      if (m) { ideas = JSON.parse(m[0]); model = used; }
+      const [rows, used] = await runAi(env, prompt, 1500, 0.2);
+      ideas = rows.filter((r) => r && typeof r.title === "string");
+      if (ideas.length) model = used;
     } catch (e) { console.error("brief AI failed", e); }
   }
   if (!ideas.length) {

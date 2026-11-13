@@ -11,11 +11,14 @@ function auth(env: Env) {
 }
 
 async function dfs(env: Env, path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`${API}/${path}`, {
+  const call = () => fetch(`${API}/${path}`, {
     method: body ? "POST" : "GET",
     headers: { Authorization: auth(env), "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
+  let res = await call();
+  // DataForSEO occasionally returns a transient 5xx; retry once after a pause
+  if (res.status >= 500) { await new Promise((r) => setTimeout(r, 5000)); res = await call(); }
   if (!res.ok) throw new Error(`DataForSEO ${path} HTTP ${res.status}`);
   const json: any = await res.json();
   if (json.status_code !== 20000) throw new Error(`DataForSEO ${path}: ${json.status_message}`);

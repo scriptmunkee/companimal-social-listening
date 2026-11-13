@@ -6,13 +6,32 @@ export const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 export const AI_FALLBACK_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 const REGIONS = ["uk", "non_uk", "unknown"];
 
-/** Run a prompt on the main model, falling back to the backup model. Returns [text, modelUsed]. */
-export async function runAi(env: Env, prompt: string, maxTokens: number, temperature = 0): Promise<[string, string]> {
-  let lastErr: unknown;
+/**
+ * Workers AI returns `response` as a string, or already parsed into an array/object
+ * when the model outputs JSON. Normalise any of those into an array of objects.
+ */
+export function toArray(resp: unknown): any[] {
+  if (Array.isArray(resp)) return resp;
+  if (resp && typeof resp === "object") {
+    const firstArray = Object.values(resp as Record<string, unknown>).find(Array.isArray);
+    return (firstArray as any[]) || [resp];
+  }
+  if (typeof resp === "string") {
+    const m = resp.match(/\[[\s\S]*\]/);
+    if (!m) return [];
+    try { return JSON.parse(m[0]); } catch { return []; }
+  }
+  return [];
+}
+
+/** Run a prompt on the main model, falling back to the backup model. Returns [array, modelUsed]. */
+export async function runAi(env: Env, prompt: string, maxTokens: number, temperature = 0): Promise<[any[], string]> {
+  let lastErr: unknown = new Error("AI returned nothing usable");
   for (const model of [AI_MODEL, AI_FALLBACK_MODEL]) {
     try {
       const out: any = await env.AI!.run(model as any, { messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature } as any);
-      return [String(out?.response ?? ""), model];
+      const arr = toArray(out?.response ?? out);
+      if (arr.length) return [arr, model];
     } catch (e) { lastErr = e; }
   }
   throw lastErr;
@@ -85,11 +104,6 @@ Posts:
 ${batch.map((b) => JSON.stringify({ id: b.id, source: b.source, title: b.title.slice(0, 200), text: b.text.slice(0, 600) })).join("\n")}`;
 }
 
-function parseJsonArray(s: string): any[] {
-  const m = s.match(/\[[\s\S]*\]/);
-  if (!m) return [];
-  try { return JSON.parse(m[0]); } catch { return []; }
-}
 
 async function urlMatch(env: Env, q: string): Promise<{ url: string | null; score: number }> {
   const qt = new Set(matchTokens(q));
@@ -119,12 +133,12 @@ export async function enrichItems(env: Env, limit = 200) {
     for (let i = 0; i < forAi.length; i += 15) {
       const batch = forAi.slice(i, i + 15);
       try {
-        const [text, model] = await runAi(env, buildPrompt(batch), 3000);
-        for (const r of parseJsonArray(text)) {
+        const [rows, model] = await runAi(env, buildPrompt(batch), 3000);
+        for (const r of rows) {
           if (r?.id && KINDS.includes(r.kind)) { results.set(r.id, { ...r, model }); aiUsed++; }
         }
       } catch (e) {
-        console.error("AI batch failed", e);
+        console.error("AI batch failed", String((e as any)?.message || e));
       }
     }
   }
