@@ -43,14 +43,18 @@ export function aiText(out: any): unknown {
  * Run a prompt on each model in turn until one returns a usable JSON array.
  * `valid` decides what counts as usable. Returns [array, modelUsed].
  */
-export async function runAi(env: Env, prompt: string, maxTokens: number, temperature = 0, models: string[] = [AI_MODEL, AI_FALLBACK_MODEL], valid: (a: any[]) => boolean = (a) => a.length > 0): Promise<[any[], string]> {
+export async function runAi(env: Env, prompt: string, maxTokens: number, temperature = 0, models: string[] = [AI_MODEL, AI_FALLBACK_MODEL], valid: (a: any[]) => boolean = (a) => a.length > 0, timeoutMs = 90000): Promise<[any[], string]> {
   let lastErr: unknown = new Error("AI returned nothing usable");
   for (const model of models) {
     try {
       const input = model.includes("gpt-oss")
-        ? { input: prompt, reasoning: { effort: "medium" }, max_output_tokens: maxTokens }
+        ? { input: prompt, reasoning: { effort: "low" }, max_output_tokens: maxTokens }
         : { messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature };
-      const out: any = await env.AI!.run(model as any, input as any);
+      // Never let one slow answer stall a run: give up on this model after the time limit
+      const out: any = await Promise.race([
+        env.AI!.run(model as any, input as any),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`${model} timed out`)), timeoutMs)),
+      ]);
       const arr = toArray(aiText(out));
       if (valid(arr)) return [arr, model];
       lastErr = new Error(`${model} returned an unusable answer`);

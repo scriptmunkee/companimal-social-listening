@@ -36,6 +36,10 @@ async function tick(env: Env) {
   await runJob(env, "serp_collect", () => collectSerpTasks(env));
   await runJob(env, "reddit_insights", () => analyseRedditThreads(env, 144, start + 4 * 60000));
   await runJob(env, "enrich", () => enrichItems(env, 400, start + 8 * 60000));
+  // One-off themes rebuild (queued by a migration), after the routine work
+  if ((await env.DB.prepare(`DELETE FROM pending_jobs WHERE job='reddit_themes_now'`).run()).meta?.changes) {
+    await runJob(env, "reddit_themes", () => buildRedditThemes(env));
+  }
   // Reddit themes as soon as the thread backlog is analysed (one-off after a backfill)
   if (await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job='reddit_themes_when_ready'`).first()) {
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM reddit_threads WHERE insight_done=0`).first<any>();
@@ -70,7 +74,7 @@ async function runPending(env: Env) {
       return { ...s, note: r.note };
     }),
     reddit_now: () => runJob(env, "reddit_post", () => postRedditTasks(env, "full")),
-    reddit_themes_now: () => runJob(env, "reddit_themes", () => buildRedditThemes(env)),
+
   };
   for (const name of Object.keys(jobs)) {
     const r = await env.DB.prepare(`DELETE FROM pending_jobs WHERE job=?1`).bind(name).run();

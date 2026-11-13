@@ -96,6 +96,10 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0013_rebuild_themes_strong_model",
     sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('reddit_themes_now', datetime('now'))`],
   },
+  {
+    name: "0014_rebuild_themes_again",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('reddit_themes_now', datetime('now'))`],
+  },
 ];
 
 let checked = false;

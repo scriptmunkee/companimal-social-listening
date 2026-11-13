@@ -109,7 +109,7 @@ id | subreddit | comments | thread theme | pain point | title
 ${ranked.map((r: any) => `${r.post_id} | r/${r.subreddit} | ${r.posts_count ?? "?"} | ${r.theme || ""} | ${(r.pain_point || "").slice(0, 90)} | ${(r.title || "").slice(0, 110)}`).join("\n")}`;
     try {
       const usable = (a: any[]) => a.filter((t) => t && typeof t.theme === "string" && Array.isArray(t.thread_ids) && t.thread_ids.length >= 2).length >= 4;
-      const [arr, used] = await runAi(env, prompt, 6000, 0.1, [AI_STRONG_MODEL, AI_MODEL], usable);
+      const [arr, used] = await runAi(env, prompt, 6000, 0.1, [AI_STRONG_MODEL, AI_MODEL], usable, 150000);
       themes = arr.filter((t) => t && typeof t.theme === "string" && Array.isArray(t.thread_ids) && t.thread_ids.length >= 2);
       if (themes.length) model = used;
     } catch (e) { console.error("reddit themes failed", String((e as any)?.message || e)); }
