@@ -5,6 +5,7 @@ import { Env, nowIso } from "./lib";
 // Jobs expected at least once in the last 26 hours, and whether they should collect something.
 const EXPECTED: { job: string; mustCollect: boolean }[] = [
   { job: "serp_post", mustCollect: false },
+  { job: "subreddits", mustCollect: false },
   { job: "youtube", mustCollect: true },
   { job: "content_analysis", mustCollect: false },
   { job: "serp_collect", mustCollect: true },

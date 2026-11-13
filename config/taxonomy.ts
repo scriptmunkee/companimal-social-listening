@@ -11,7 +11,7 @@ export const PROJECT = {
   languageCode: "en",
 };
 
-export const QUERY_VERSION = "2026-11-13.1";
+export const QUERY_VERSION = "2026-11-13.2";
 
 export type Lens = "buyer" | "breeder" | "rescue" | "owner";
 
@@ -71,6 +71,20 @@ export const SERP_FORUM_QUERIES: string[] = [
   "casualuk reddit puppy",
 ];
 export const SERP_FORUM_PER_DAY = 6; // rotate through the list, 6 searches a day
+
+// Subreddits read daily through Google (site: search, past week, deduplicated by URL).
+// Gives thread titles and Google's snippet, which is where the question usually is.
+// site: queries cost 5x a normal search, roughly $0.01 per subreddit per day at depth 30.
+export const SUBREDDITS: { sub: string; filter?: string }[] = [
+  { sub: "dogs" },
+  { sub: "puppy101" },
+  { sub: "DogAdvice" },
+  { sub: "Dogtraining" },
+  { sub: "rescuedogs" },
+  { sub: "AskUK", filter: "dog OR puppy" },
+  { sub: "CasualUK", filter: "dog OR puppy" },
+];
+export const SUBREDDIT_DEPTH = 30;
 
 export const SERP_PAA_QUERIES: string[] = [
   "buying a puppy",

@@ -43,6 +43,11 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
       `INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('sitemap', datetime('now')), ('collect', datetime('now')), ('paa', datetime('now')), ('morning_when_ready', datetime('now'))`,
     ],
   },
+  {
+    // Read subreddits now rather than waiting for 02:00; brief rebuilt once analysed
+    name: "0008_subreddits_now",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('subreddits', datetime('now')), ('morning_when_ready', datetime('now'))`],
+  },
 ];
 
 let checked = false;

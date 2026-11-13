@@ -1,7 +1,7 @@
 import * as TAX from "../config/taxonomy";
 import { PROJECT } from "../config/taxonomy";
 import { Env, runJob, recordQueryVersion, nowIso } from "./lib";
-import { postSerpTasks, collectSerpTasks, collectContentAnalysis } from "./collectors/dataforseo";
+import { postSerpTasks, postSubredditTasks, collectSerpTasks, collectContentAnalysis } from "./collectors/dataforseo";
 import { collectYoutube } from "./collectors/youtube";
 import { enrichItems, refreshSitemap } from "./enrich";
 import { rollup, buildBrief, opportunities, risingTopics } from "./analysis";
@@ -14,6 +14,7 @@ async function dailyCollect(env: Env) {
   await recordQueryVersion(env, TAX);
   const monday = new Date().getUTCDay() === 1;
   await runJob(env, "serp_post", () => postSerpTasks(env, monday));
+  await runJob(env, "subreddits", () => postSubredditTasks(env));
   await runJob(env, "youtube", () => collectYoutube(env));
   await runJob(env, "content_analysis", () => collectContentAnalysis(env));
 }
@@ -40,6 +41,7 @@ async function runPending(env: Env) {
     sitemap: () => runJob(env, "sitemap", () => refreshSitemap(env)),
     collect: () => dailyCollect(env),
     paa: () => runJob(env, "serp_post", () => postSerpTasks(env, true, false)),
+    subreddits: () => runJob(env, "subreddits", () => postSubredditTasks(env)),
   };
   for (const name of Object.keys(jobs)) {
     const r = await env.DB.prepare(`DELETE FROM pending_jobs WHERE job=?1`).bind(name).run();

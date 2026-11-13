@@ -1,4 +1,4 @@
-import { PROJECT, SERP_FORUM_QUERIES, SERP_FORUM_PER_DAY, SERP_PAA_QUERIES, CONTENT_ANALYSIS_KEYWORDS, CONTENT_ANALYSIS_LIMIT, UK_FORUM_DOMAINS } from "../../config/taxonomy";
+import { PROJECT, SUBREDDITS, SUBREDDIT_DEPTH, SERP_FORUM_QUERIES, SERP_FORUM_PER_DAY, SERP_PAA_QUERIES, CONTENT_ANALYSIS_KEYWORDS, CONTENT_ANALYSIS_LIMIT, UK_FORUM_DOMAINS } from "../../config/taxonomy";
 import { Env, Item, archiveRaw, saveItems, nowIso, clean, dayOfYear } from "../lib";
 import { mockSerp, mockContentAnalysis } from "../mock";
 
@@ -64,7 +64,7 @@ export function serpToItems(result: any, kind: string, query: string): Item[] {
   const out: Item[] = [];
   for (const el of result?.items || []) {
     if (el.type === "organic" && el.url && isForum(el.url)) {
-      out.push({ source: "serp_forum", source_id: el.url, url: el.url, title: clean(el.title, 300), text: clean(el.description), community: subredditOf(el.url) || el.domain, query });
+      out.push({ source: "serp_forum", source_id: el.url.replace(/\?.*$/, ""), url: el.url, title: clean(String(el.title || "").replace(/\s*:\s*r\/\w+\s*$/i, ""), 300), text: clean(el.description), community: subredditOf(el.url) || el.domain, query, published_at: el.timestamp || null });
     }
     if (el.type === "people_also_ask") {
       for (const q of el.items || []) {
@@ -80,6 +80,25 @@ export function serpToItems(result: any, kind: string, query: string): Item[] {
     }
   }
   return out;
+}
+
+/** Post one past-week Google search per subreddit to the standard queue. */
+export async function postSubredditTasks(env: Env) {
+  const tasks = SUBREDDITS.map(({ sub, filter }) => {
+    const q = `site:reddit.com/r/${sub}${filter ? ` ${filter}` : ""}`;
+    return { keyword: q, location_code: PROJECT.locationCode, language_code: PROJECT.languageCode, depth: SUBREDDIT_DEPTH, search_param: "&tbs=qdr:w", tag: `csl|${PROJECT.id}|subreddit|${q}` };
+  });
+  if (env.MOCK === "1") {
+    for (const t of tasks) await env.DB.prepare(`INSERT OR IGNORE INTO serp_tasks (task_id, project, kind, query, posted_at) VALUES (?1, ?2, 'forum', ?3, ?4)`).bind(`mock-sub-${t.keyword}-${Date.now()}`, PROJECT.id, t.keyword, nowIso()).run();
+    return { added: 0, seen: 0, note: `mock posted ${tasks.length}` };
+  }
+  const json = await dfs(env, "serp/google/organic/task_post", tasks);
+  for (const t of json.tasks || []) {
+    if (t.status_code !== 20100) continue;
+    const [, , kind, query] = String(t.data?.tag || "").split("|");
+    await env.DB.prepare(`INSERT OR IGNORE INTO serp_tasks (task_id, project, kind, query, posted_at) VALUES (?1, ?2, ?3, ?4, ?5)`).bind(t.id, PROJECT.id, kind, query, nowIso()).run();
+  }
+  return { added: 0, seen: 0, cost: json.cost || 0, note: `posted ${tasks.length} subreddit searches` };
 }
 
 /** Collect finished SERP tasks from the standard queue. */
