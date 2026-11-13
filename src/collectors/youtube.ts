@@ -18,6 +18,15 @@ async function yt(env: Env, path: string, params: Record<string, string>): Promi
   return res.json();
 }
 
+const DOG_WORDS = /\b(dogs?|pupp(y|ies)|pups?|canine|breeders?|rescue|rehom\w*|kennel|whelp\w*|litters?|spaniel|labrador|retriever|terrier|poodle|cockapoo|cavapoo|doodle|bulldog|collie|shepherd|dachshund|pug|husky|greyhound|lurcher|staffie|staffy|vet)\b/i;
+const OFF_TOPIC = /#shorts|puppy chow|\bsnl\b|\bhorse|pigeon|\bcat(s)?\b(?!.*\bdogs?\b)|prank|meme/i;
+
+/** Keep only videos that are actually about dogs (title or description), not memes or Shorts. */
+export function isDogVideo(title: string, description: string): boolean {
+  if (OFF_TOPIC.test(title)) return false;
+  return DOG_WORDS.test(title) || DOG_WORDS.test(description.slice(0, 300));
+}
+
 /** Look up each configured UK channel once and remember its id. */
 async function resolveChannels(env: Env): Promise<{ id: string; title: string; name: string }[]> {
   const rows = await env.DB.prepare(`SELECT name, channel_id, title, status FROM yt_channels`).all<any>();
@@ -32,8 +41,11 @@ async function resolveChannels(env: Env): Promise<{ id: string; title: string; n
         const j = await yt(env, "channels", { part: "snippet", forHandle: name });
         id = j.items?.[0]?.id || null; title = j.items?.[0]?.snippet?.title || "";
       } else {
-        const j = await yt(env, "search", { part: "snippet", q: name, type: "channel", regionCode: "GB", maxResults: "1" });
-        id = j.items?.[0]?.id?.channelId || null; title = j.items?.[0]?.snippet?.title || "";
+        const j = await yt(env, "search", { part: "snippet", q: name, type: "channel", regionCode: "GB", maxResults: "3" });
+        // Accept only a result whose title shares a distinctive word with the configured name
+        const words = name.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !["dogs", "training", "home", "club", "academy"].includes(w));
+        const hit = (j.items || []).find((it: any) => words.some((w) => (it.snippet?.title || "").toLowerCase().includes(w)));
+        id = hit?.id?.channelId || null; title = hit?.snippet?.title || "";
       }
       r = { name, channel_id: id, title, status: id ? "ok" : "not_found" };
       await env.DB.prepare(`INSERT OR REPLACE INTO yt_channels (name, channel_id, title, resolved_at, status) VALUES (?1, ?2, ?3, ?4, ?5)`).bind(name, id, title, nowIso(), r.status).run();
@@ -49,13 +61,20 @@ export async function collectYoutube(env: Env) {
   const videoIds = new Map<string, { title: string; channel: string; query: string }>();
   for (const q of YOUTUBE_QUERIES) {
     const raw = env.MOCK === "1" ? mockYoutubeSearch(q) : await yt(env, "search", {
+      // Relevance (not view count, which surfaced viral off-topic videos), Pets & Animals
+      // category only, 4-20 minute videos (no Shorts), UK region bias
       part: "snippet", q, type: "video", regionCode: "GB", relevanceLanguage: "en",
-      publishedAfter, order: "viewCount", maxResults: String(YOUTUBE_VIDEOS_PER_QUERY),
+      videoCategoryId: "15", videoDuration: "medium",
+      publishedAfter, order: "relevance", maxResults: String(YOUTUBE_VIDEOS_PER_QUERY * 3),
     });
     await archiveRaw(env, "youtube_search", q, raw);
+    let kept = 0;
     for (const v of raw.items || []) {
       const id = v.id?.videoId;
-      if (id && !videoIds.has(id)) videoIds.set(id, { title: v.snippet?.title || "", channel: v.snippet?.channelTitle || "", query: q });
+      const title = v.snippet?.title || "";
+      if (!id || videoIds.has(id) || !isDogVideo(title, v.snippet?.description || "")) continue;
+      videoIds.set(id, { title, channel: v.snippet?.channelTitle || "", query: q });
+      if (++kept >= YOUTUBE_VIDEOS_PER_QUERY) break;
     }
   }
 

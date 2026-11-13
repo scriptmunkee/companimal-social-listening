@@ -48,7 +48,10 @@ export function regionOf(text: string, url: string | null, community: string | n
   if (uk > non || ukSource) return "uk";
   return "unknown";
 }
-const KINDS = ["question", "problem", "recommendation", "myth", "story", "opinion", "other"];
+const KINDS = ["question", "problem", "recommendation", "myth", "story", "opinion", "other", "irrelevant"];
+// Must mention something dog-related to be considered at all when the AI isn't available
+const DOG_TERMS = /\b(dogs?|pupp(y|ies)|pups?|canine|breeders?|breed|rescue|rehom\w*|kennel|whelp\w*|litters?|vet|jabs?|lead|walkies|crate|chew\w*|bark\w*|groom\w*|spaniel|labrador|lab|retriever|terrier|poodle|cockapoo|cavapoo|doodle|bulldog|collie|shepherd|dachshund|pug|husky|greyhound|lurcher|staff(ie|y)|insurance)\b/i;
+const wordCount = (s: string | null) => (s || "").trim().split(/\s+/).filter(Boolean).length;
 const STOP = new Set("a an the and or but if of to in on for with is are was were be been it this that my your i we you our at as by from how what why when which who do does did can could should would will just so me im i'm uk".split(" "));
 
 // Words too common in this niche to signal that a page answers a question
@@ -67,6 +70,7 @@ export function matchTokens(s: string): string[] {
 /** Rules-based fallback, also used for very short texts to save AI calls. */
 export function heuristic(title: string, text: string) {
   const t = `${title} ${text}`.toLowerCase();
+  if (!DOG_TERMS.test(text || title)) return { kind: "irrelevant", topic: "other", lens: "owner", question: null as string | null, sentiment: "neutral" };
   let topic = "other", best = 0;
   for (const tp of TOPICS) {
     const hits = tp.keywords.filter((k) => t.includes(k)).length;
@@ -81,7 +85,9 @@ export function heuristic(title: string, text: string) {
   else if (/\b(we got|our puppy|my dog|my puppy|when we|last year)\b/.test(t)) kind = "story";
   else if (body.length > 40) kind = "opinion";
   const qm = body.match(/[^.!?]*\?/);
-  const question = kind === "question" ? clean(qm ? qm[0] : body, 240) : null;
+  let question = kind === "question" ? clean(qm ? qm[0] : body, 240) : null;
+  // Rules can't judge relevance well: only keep questions that hit a real topic and are a real sentence
+  if (question && (topic === "other" || wordCount(question) < 4)) { question = null; kind = "other"; }
   const lens = TOPICS.find((x) => x.id === topic)?.lens[0] || "owner";
   return { kind, topic, lens, question, sentiment: "neutral" };
 }
@@ -91,8 +97,8 @@ function buildPrompt(batch: { id: string; title: string; text: string; source: s
   return `You classify UK dog-related social posts to inform content strategy for a puppy marketplace.
 For each post return an object with:
 - id: the given id
-- kind: one of ${KINDS.join(", ")}
-- question: if the post asks or implies a question, rewrite it as one clear standalone question in plain UK English, keeping the poster's own wording where possible (max 20 words); otherwise null
+- kind: one of ${KINDS.join(", ")}. Use "irrelevant" for anything not genuinely about dogs, puppies, dog ownership, breeding, buying, selling or rehoming dogs: jokes, memes, compliments to the creator ("great video"), food, other animals, TV, off-topic chat. Be strict.
+- question: only if the post asks or implies a genuine question a dog owner, buyer, breeder or rescue would want answered, rewrite it as one clear standalone question in plain UK English, keeping the poster's own wording where possible (max 20 words); otherwise null
 - topic: one of [${topicList}]
 - lens: buyer, breeder, rescue or owner (who is speaking or who the question is for)
 - sentiment: positive, negative or neutral
@@ -162,7 +168,8 @@ export async function enrichItems(env: Env, limit = 200) {
     const region = ruleRegion !== "unknown" ? ruleRegion : aiRegion;
     // PAA titles are questions by definition
     if (it.source === "serp_paa") { e.kind = "question"; e.question = clean(it.title, 240); }
-    const m = e.question || e.kind !== "other" ? await urlMatch(env, `${e.question || it.title}`) : { url: null, score: 0 };
+    if (e.kind === "irrelevant" || wordCount(e.question) < 4) e.question = null;
+    const m = e.question || !["other", "irrelevant"].includes(e.kind) ? await urlMatch(env, `${e.question || it.title}`) : { url: null, score: 0 };
     stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO enrichments (item_id, kind, question, topic, lens, sentiment, matched_url, match_score, model, enriched_at, region) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`)
       .bind(it.id, e.kind, e.question, e.topic, e.lens, e.sentiment, m.url, m.score, e.model, nowIso(), region));
     stmts.push(env.DB.prepare(`UPDATE items SET enriched=1 WHERE id=?1`).bind(it.id));

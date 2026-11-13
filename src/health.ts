@@ -16,17 +16,20 @@ export interface HealthIssue { job: string; problem: string }
 
 export async function checkHealth(env: Env): Promise<HealthIssue[]> {
   const since = new Date(Date.now() - 26 * 3600000).toISOString();
-  const rows = (await env.DB.prepare(`SELECT job, status, items_seen, note FROM runs WHERE project=?1 AND started_at>=?2`).bind(PROJECT.id, since).all<any>()).results || [];
+  const rows = (await env.DB.prepare(`SELECT job, status, items_seen, note, started_at FROM runs WHERE project=?1 AND started_at>=?2`).bind(PROJECT.id, since).all<any>()).results || [];
   const issues: HealthIssue[] = [];
+  const first = await env.DB.prepare(`SELECT MIN(started_at) AS t FROM runs WHERE project=?1`).bind(PROJECT.id).first<any>();
+  const young = !first?.t || first.t > since; // under 26 hours old: not every job has had its turn
   for (const exp of EXPECTED) {
     const runs = rows.filter((r: any) => r.job === exp.job);
-    if (!runs.length) { issues.push({ job: exp.job, problem: "did not run in the last 26 hours" }); continue; }
-    const errors = runs.filter((r: any) => r.status === "error");
+    if (!runs.length) { if (young) continue; issues.push({ job: exp.job, problem: "did not run in the last 26 hours" }); continue; }
+    const latest = [...runs].sort((a: any, b: any) => (a.started_at < b.started_at ? 1 : -1))[0];
+    const errors = latest.status === "error" ? runs.filter((r: any) => r.status === "error") : [];
     if (errors.length) issues.push({ job: exp.job, problem: `failed ${errors.length} of ${runs.length} times: ${String(errors[0].note).slice(0, 200)}` });
     else if (exp.mustCollect && runs.every((r: any) => !r.items_seen)) issues.push({ job: exp.job, problem: "ran but collected nothing" });
   }
   // AI health: enrichment ran on posts but the AI handled none of them
-  const enrich = rows.filter((r: any) => r.job === "enrich" && r.items_seen > 0);
+  const enrich = rows.filter((r: any) => r.job === "enrich" && r.items_seen > 0).sort((a: any, b: any) => (a.started_at < b.started_at ? 1 : -1)).slice(0, 3);
   if (enrich.length && enrich.every((r: any) => /ai=0\b/.test(r.note || ""))) {
     issues.push({ job: "enrich", problem: "AI model did not respond; posts were tagged by keyword rules only" });
   }

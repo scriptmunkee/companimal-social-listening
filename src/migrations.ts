@@ -31,6 +31,10 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
         id TEXT PRIMARY KEY, project TEXT NOT NULL, created_at TEXT NOT NULL, issues_json TEXT NOT NULL, emailed INTEGER DEFAULT 0)`,
     ],
   },
+  {
+    name: "0006_relevance_reclassify",
+    sql: [`UPDATE items SET enriched=0`],
+  },
 ];
 
 let checked = false;

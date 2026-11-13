@@ -10,7 +10,7 @@ export async function rollup(env: Env, days = 3) {
     INSERT INTO daily_counts (project, date, topic, lens, kind, region, n, engagement)
     SELECT i.project, i.collected_date, e.topic, e.lens, e.kind, COALESCE(e.region,'unknown'), COUNT(*), COALESCE(SUM(i.engagement),0)
     FROM items i JOIN enrichments e ON e.item_id=i.id
-    WHERE i.project=?1 AND i.collected_date>=?2
+    WHERE i.project=?1 AND i.collected_date>=?2 AND e.kind <> 'irrelevant'
     GROUP BY i.project, i.collected_date, e.topic, e.lens, e.kind, COALESCE(e.region,'unknown')`).bind(PROJECT.id, from).run();
   return { added: r.meta?.changes ?? 0, seen: 0 };
 }
@@ -18,6 +18,8 @@ export async function rollup(env: Env, days = 3) {
 /** Region filter: "uk" (default) keeps UK and unknown, "all" keeps everything. */
 export type RegionFilter = "uk" | "all";
 export const regionSql = (col: string, region: RegionFilter = "uk") => (region === "all" ? "" : ` AND COALESCE(${col},'unknown') <> 'non_uk'`);
+// Posts the AI judged off-topic never reach any view
+export const RELEVANT_SQL = ` AND COALESCE(e.kind,'') <> 'irrelevant'`;
 
 export interface RisingTopic { topic: string; label: string; last7: number; prior28: number; ratio: number; spark: number[]; baselineReady: boolean }
 
@@ -58,7 +60,7 @@ export async function opportunities(env: Env, days = 30, lens?: string, limit = 
   const rows = await env.DB.prepare(`
     SELECT e.question, e.topic, e.matched_url, e.match_score, i.engagement, i.source, i.url, i.collected_date
     FROM enrichments e JOIN items i ON i.id=e.item_id
-    WHERE i.project=?1 AND e.question IS NOT NULL AND i.collected_date>=?2 ${lens ? "AND e.lens=?3" : ""}${regionSql("e.region", region)}`)
+    WHERE i.project=?1 AND e.question IS NOT NULL AND i.collected_date>=?2 ${lens ? "AND e.lens=?3" : ""}${regionSql("e.region", region)}${RELEVANT_SQL}`)
     .bind(...[PROJECT.id, daysAgo(days), ...(lens ? [lens] : [])]).all<any>();
   const rising = new Map((await risingTopics(env, lens, region)).map((r) => [r.topic, r.ratio]));
   const groups = new Map<string, any>();

@@ -21,7 +21,7 @@ async function dailyCollect(env: Env) {
 /** Hourly: pick up finished SERP tasks, enrich new items. */
 async function hourly(env: Env) {
   await runJob(env, "serp_collect", () => collectSerpTasks(env));
-  await runJob(env, "enrich", () => enrichItems(env, 200));
+  await runJob(env, "enrich", () => enrichItems(env, 400));
 }
 
 /** 06:30 daily: rollups and the morning brief. Sitemap refresh on Mondays. */

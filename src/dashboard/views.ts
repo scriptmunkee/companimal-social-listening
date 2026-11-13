@@ -1,6 +1,6 @@
 import { PROJECT, TOPICS, LENSES } from "../../config/taxonomy";
 import { Env, daysAgo } from "../lib";
-import { risingTopics, opportunities, regionSql, RegionFilter } from "../analysis";
+import { risingTopics, opportunities, regionSql, RegionFilter, RELEVANT_SQL } from "../analysis";
 import { checkHealth } from "../health";
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
@@ -84,7 +84,8 @@ export async function viewToday(env: Env, lens?: string, region: RegionFilter = 
   const k = await env.DB.prepare(`SELECT
     (SELECT COUNT(*) FROM items WHERE project=?1) AS total,
     (SELECT COUNT(*) FROM items WHERE project=?1 AND collected_date>=?2) AS week,
-    (SELECT COUNT(*) FROM enrichments e JOIN items i ON i.id=e.item_id WHERE i.project=?1 AND e.question IS NOT NULL${regionSql("e.region", region)}) AS questions,
+    (SELECT COUNT(*) FROM enrichments e JOIN items i ON i.id=e.item_id WHERE i.project=?1 AND e.question IS NOT NULL${regionSql("e.region", region)}${RELEVANT_SQL}) AS questions,
+    (SELECT COUNT(*) FROM enrichments e JOIN items i ON i.id=e.item_id WHERE i.project=?1 AND e.kind='irrelevant') AS irrelevant,
     (SELECT COUNT(*) FROM enrichments e JOIN items i ON i.id=e.item_id WHERE i.project=?1 AND e.region='uk') AS uk,
     (SELECT COUNT(*) FROM enrichments e JOIN items i ON i.id=e.item_id WHERE i.project=?1 AND e.region IS NOT NULL) AS tagged,
     (SELECT MIN(collected_date) FROM items WHERE project=?1) AS since`).bind(PROJECT.id, daysAgo(7)).first<any>();
@@ -94,7 +95,7 @@ export async function viewToday(env: Env, lens?: string, region: RegionFilter = 
   const ukPct = k?.tagged ? Math.round((k.uk / k.tagged) * 100) : 0;
   const body = `${issues.length ? `<div class="alert"><b>${issues.length} collection issue(s) in the last day</b><ul>${issues.map((i) => `<li>${esc(i.job)}: ${esc(i.problem)}</li>`).join("")}</ul></div>` : ""}<h1>Today</h1><p class="sub">${b ? `Brief for ${esc(brief.date)} · ${brief.model === "rules" ? "rules-based" : "AI-written"}` : "No brief yet. The first one is written after the first full day of collection."}</p>
 <div class="grid">
-<div class="card kpi"><div class="n">${(k?.total || 0).toLocaleString("en-GB")}</div><div class="l">Posts archived${k?.since ? ` since ${esc(k.since)}` : ""}</div></div>
+<div class="card kpi"><div class="n">${(k?.total || 0).toLocaleString("en-GB")}</div><div class="l">Posts archived${k?.since ? ` since ${esc(k.since)}` : ""}${k?.irrelevant ? ` · ${(k.irrelevant).toLocaleString("en-GB")} off-topic hidden` : ""}</div></div>
 <div class="card kpi"><div class="n">${(k?.week || 0).toLocaleString("en-GB")}</div><div class="l">Collected in the last 7 days</div></div>
 <div class="card kpi"><div class="n">${(k?.questions || 0).toLocaleString("en-GB")}</div><div class="l">Questions extracted${region === "uk" ? " (UK and unsure)" : ""}</div></div>
 <div class="card kpi"><div class="n">${ukPct}%</div><div class="l">Of tagged posts clearly from the UK</div></div>
@@ -149,11 +150,11 @@ ${rows.results?.length ? `<table><tr><th>Claim</th><th>Topic</th><th class="num"
 }
 
 export async function viewSources(env: Env, lens?: string, region: RegionFilter = "uk") {
-  const comm = await env.DB.prepare(`SELECT i.source, i.community, COUNT(*) AS n, SUM(CASE WHEN e.question IS NOT NULL THEN 1 ELSE 0 END) AS q, SUM(i.engagement) AS eng, SUM(CASE WHEN e.region='uk' THEN 1 ELSE 0 END) AS uk, SUM(CASE WHEN e.region='non_uk' THEN 1 ELSE 0 END) AS nonuk FROM items i LEFT JOIN enrichments e ON e.item_id=i.id WHERE i.project=?1 AND i.collected_date>=?2 GROUP BY i.source, i.community ORDER BY q DESC, n DESC LIMIT 40`).bind(PROJECT.id, daysAgo(30)).all<any>();
+  const comm = await env.DB.prepare(`SELECT i.source, i.community, COUNT(*) AS n, SUM(CASE WHEN e.question IS NOT NULL THEN 1 ELSE 0 END) AS q, SUM(i.engagement) AS eng, SUM(CASE WHEN e.region='uk' THEN 1 ELSE 0 END) AS uk, SUM(CASE WHEN e.region='non_uk' THEN 1 ELSE 0 END) AS nonuk, SUM(CASE WHEN e.kind='irrelevant' THEN 1 ELSE 0 END) AS offtopic FROM items i LEFT JOIN enrichments e ON e.item_id=i.id WHERE i.project=?1 AND i.collected_date>=?2 GROUP BY i.source, i.community ORDER BY q DESC, n DESC LIMIT 40`).bind(PROJECT.id, daysAgo(30)).all<any>();
   const chans = (await env.DB.prepare(`SELECT name, title, status FROM yt_channels ORDER BY status, name`).all<any>()).results || [];
   const runs = await env.DB.prepare(`SELECT job, started_at, status, items_new, items_seen, cost_usd, note FROM runs WHERE project=?1 ORDER BY started_at DESC LIMIT 40`).bind(PROJECT.id).all<any>();
   const body = `<h1>Sources and coverage</h1><p class="sub">Which communities produce the most questions, and whether every collector ran.</p>
-<h2>Top communities (30 days)</h2>${comm.results?.length ? `<table><tr><th>Source</th><th>Community</th><th class="num">Posts</th><th class="num">Questions</th><th class="num">Question rate</th><th class="num">UK</th><th class="num">Not UK</th><th class="num">Engagement</th></tr>${comm.results.map((r: any) => `<tr><td>${esc(sourceLabel(r.source))}</td><td>${esc(r.community || "")}</td><td class="num">${r.n}</td><td class="num">${r.q}</td><td class="num">${Math.round((r.q / r.n) * 100)}%</td><td class="num">${Math.round(((r.uk || 0) / r.n) * 100)}%</td><td class="num">${Math.round(((r.nonuk || 0) / r.n) * 100)}%</td><td class="num">${r.eng || 0}</td></tr>`).join("")}</table>` : `<div class="card empty">No data yet.</div>`}
+<h2>Top communities (30 days)</h2>${comm.results?.length ? `<table><tr><th>Source</th><th>Community</th><th class="num">Posts</th><th class="num">Questions</th><th class="num">Question rate</th><th class="num">UK</th><th class="num">Not UK</th><th class="num">Off-topic</th><th class="num">Engagement</th></tr>${comm.results.map((r: any) => `<tr><td>${esc(sourceLabel(r.source))}</td><td>${esc(r.community || "")}</td><td class="num">${r.n}</td><td class="num">${r.q}</td><td class="num">${Math.round((r.q / r.n) * 100)}%</td><td class="num">${Math.round(((r.uk || 0) / r.n) * 100)}%</td><td class="num">${Math.round(((r.nonuk || 0) / r.n) * 100)}%</td><td class="num">${Math.round(((r.offtopic || 0) / r.n) * 100)}%</td><td class="num">${r.eng || 0}</td></tr>`).join("")}</table>` : `<div class="card empty">No data yet.</div>`}
 <h2>UK YouTube channels</h2>${chans.length ? `<table><tr><th>Configured as</th><th>Found channel</th><th>Status</th></tr>${chans.map((c: any) => `<tr><td>${esc(c.name)}</td><td>${esc(c.title || "")}</td><td class="${c.status === "ok" ? "ok" : "err"}">${c.status === "ok" ? "ok" : "not found"}</td></tr>`).join("")}</table>` : `<div class="card empty">Channels are looked up on the next YouTube run.</div>`}
 <h2>Recent runs</h2>${runs.results?.length ? `<table><tr><th>Job</th><th>Started</th><th>Status</th><th class="num">New</th><th class="num">Seen</th><th class="num">Cost</th><th>Note</th></tr>${runs.results.map((r: any) => `<tr><td>${esc(r.job)}</td><td>${esc(r.started_at.replace("T", " ").slice(0, 16))}</td><td class="${r.status === "ok" ? "ok" : "err"}">${esc(r.status)}</td><td class="num">${r.items_new}</td><td class="num">${r.items_seen}</td><td class="num">$${(r.cost_usd || 0).toFixed(3)}</td><td class="muted">${esc(r.note || "")}</td></tr>`).join("")}</table>` : `<div class="card empty">No runs yet.</div>`}`;
   return layout("/sources", "Sources and coverage", body, lens, region);
