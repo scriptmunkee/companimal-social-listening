@@ -1,7 +1,7 @@
 // AI reading of Reddit threads: what each one is really about, and the week's conversation themes.
 import { PROJECT, TOPICS, REDDIT_INSIGHTS_PER_RUN } from "../config/taxonomy";
 import { Env, nowIso, today, daysAgo, clean, inWaves } from "./lib";
-import { runAi, regionOf, heuristic } from "./enrich";
+import { runAi, regionOf, heuristic, cleanIdea, sentenceCase, AI_STRONG_MODEL, AI_MODEL, AI_FALLBACK_MODEL } from "./enrich";
 import { threadScore } from "./collectors/reddit";
 
 const KINDS = ["question", "advice_request", "vent", "story", "celebration", "debate", "recommendation_request", "myth", "news", "other", "irrelevant"];
@@ -62,8 +62,8 @@ export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER
     }
     const h = heuristic(t.title || "", t.snippet || "");
     const ins = r ? {
-      kind: r.kind, theme: clean(r.theme, 60), pain_point: clean(r.pain_point, 240), need: clean(r.need, 80),
-      emotion: EMOTIONS.includes(r.emotion) ? r.emotion : "neutral", content_angle: clean(r.content_angle, 160),
+      kind: r.kind, theme: sentenceCase(clean(r.theme, 60)), pain_point: clean(r.pain_point, 240), need: clean(r.need, 80),
+      emotion: EMOTIONS.includes(r.emotion) ? r.emotion : "neutral", content_angle: cleanIdea(clean(r.content_angle, 160)),
       lens: LENSES.includes(r.lens) ? r.lens : h.lens, topic: validTopics.has(r.topic) ? r.topic : h.topic,
       region: ruleRegion !== "unknown" ? ruleRegion : REGIONS.includes(r.region) ? r.region : "unknown", model,
     } : {
@@ -108,7 +108,8 @@ Order themes by total comments then thread count. Return ONLY a JSON array of {"
 id | subreddit | comments | thread theme | pain point | title
 ${ranked.map((r: any) => `${r.post_id} | r/${r.subreddit} | ${r.posts_count ?? "?"} | ${r.theme || ""} | ${(r.pain_point || "").slice(0, 90)} | ${(r.title || "").slice(0, 110)}`).join("\n")}`;
     try {
-      const [arr, used] = await runAi(env, prompt, 4000, 0.1);
+      const usable = (a: any[]) => a.filter((t) => t && typeof t.theme === "string" && Array.isArray(t.thread_ids) && t.thread_ids.length >= 2).length >= 4;
+      const [arr, used] = await runAi(env, prompt, 6000, 0.1, [AI_STRONG_MODEL, AI_MODEL], usable);
       themes = arr.filter((t) => t && typeof t.theme === "string" && Array.isArray(t.thread_ids) && t.thread_ids.length >= 2);
       if (themes.length) model = used;
     } catch (e) { console.error("reddit themes failed", String((e as any)?.message || e)); }
@@ -128,7 +129,7 @@ ${ranked.map((r: any) => `${r.post_id} | r/${r.subreddit} | ${r.posts_count ?? "
     const ids = (t.thread_ids || []).map(String).filter((id: string) => valid.has(id));
     if (!ids.length) continue;
     stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO reddit_themes (project, date, theme, summary, why, ideas_json, thread_ids_json, thread_count, sentiment, model, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`)
-      .bind(PROJECT.id, date, clean(t.theme, 80), clean(t.summary, 400), clean(t.why, 300), JSON.stringify((t.ideas || []).slice(0, 3)), JSON.stringify(ids), ids.length, ["positive", "mixed", "negative"].includes(t.sentiment) ? t.sentiment : "mixed", model, nowIso()));
+      .bind(PROJECT.id, date, sentenceCase(clean(t.theme, 80)), clean(t.summary, 400), clean(t.why, 300), JSON.stringify((t.ideas || []).map(cleanIdea).filter(Boolean).slice(0, 3)), JSON.stringify(ids), ids.length, ["positive", "mixed", "negative"].includes(t.sentiment) ? t.sentiment : "mixed", model, nowIso()));
   }
   await env.DB.batch(stmts);
   return { added: stmts.length - 1, seen: ranked.length, note: model };

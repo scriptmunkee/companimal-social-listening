@@ -4,6 +4,8 @@ import { Env, nowIso, clean, inWaves } from "./lib";
 export const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 // Used if the main model is retired or failing
 export const AI_FALLBACK_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+// Stronger instruction-follower for low-volume synthesis (weekly themes); falls back to AI_MODEL
+export const AI_STRONG_MODEL = "@cf/openai/gpt-oss-120b";
 const REGIONS = ["uk", "non_uk", "unknown"];
 
 /**
@@ -24,17 +26,56 @@ export function toArray(resp: unknown): any[] {
   return [];
 }
 
-/** Run a prompt on the main model, falling back to the backup model. Returns [array, modelUsed]. */
-export async function runAi(env: Env, prompt: string, maxTokens: number, temperature = 0): Promise<[any[], string]> {
+/** Pull the text out of any Workers AI response shape (chat, Responses API, OpenAI-style). */
+export function aiText(out: any): unknown {
+  if (out == null) return "";
+  if (out.response !== undefined) return out.response;
+  if (Array.isArray(out.output)) {
+    const texts: string[] = [];
+    for (const o of out.output) for (const c of o?.content || []) if (typeof c?.text === "string") texts.push(c.text);
+    if (texts.length) return texts.join("\n");
+  }
+  if (out.choices?.[0]?.message?.content) return out.choices[0].message.content;
+  return out;
+}
+
+/**
+ * Run a prompt on each model in turn until one returns a usable JSON array.
+ * `valid` decides what counts as usable. Returns [array, modelUsed].
+ */
+export async function runAi(env: Env, prompt: string, maxTokens: number, temperature = 0, models: string[] = [AI_MODEL, AI_FALLBACK_MODEL], valid: (a: any[]) => boolean = (a) => a.length > 0): Promise<[any[], string]> {
   let lastErr: unknown = new Error("AI returned nothing usable");
-  for (const model of [AI_MODEL, AI_FALLBACK_MODEL]) {
+  for (const model of models) {
     try {
-      const out: any = await env.AI!.run(model as any, { messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature } as any);
-      const arr = toArray(out?.response ?? out);
-      if (arr.length) return [arr, model];
+      const input = model.includes("gpt-oss")
+        ? { input: prompt, reasoning: { effort: "medium" }, max_output_tokens: maxTokens }
+        : { messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature };
+      const out: any = await env.AI!.run(model as any, input as any);
+      const arr = toArray(aiText(out));
+      if (valid(arr)) return [arr, model];
+      lastErr = new Error(`${model} returned an unusable answer`);
     } catch (e) { lastErr = e; }
   }
   throw lastErr;
+}
+
+const KEEP_CAPS = /^(UK|US|NHS|RSPCA|PDSA|XL|DIY|KC|PetPlan|Petplan|Pets4Homes|Dogs|Trust|Kennel|Club|Battersea|Blue|Cross|Lucy's|Law|England|Scotland|Wales|Ireland|London|British|Britain|I|I'm|I've)$/;
+/** Sentence case: keep the first word, acronyms, brands and proper nouns; lower-case the rest. */
+export function sentenceCase(s: string | null): string | null {
+  if (!s) return s;
+  const words = s.trim().split(/\s+/);
+  return words.map((w, i) => {
+    if (i === 0) return w[0].toUpperCase() + w.slice(1);
+    if (KEEP_CAPS.test(w.replace(/[^A-Za-z']/g, "")) || /[A-Z].*[A-Z]/.test(w) || /\d/.test(w)) return w;
+    return w.toLowerCase();
+  }).join(" ");
+}
+
+const FILLER = /\b101\b|tips (and|&) tricks|what you need to know|everything you need to know|what to expect|ultimate guide|a comprehensive guide|strategies for success/i;
+/** Drop filler titles; sentence-case the rest. */
+export function cleanIdea(s: unknown): string | null {
+  if (typeof s !== "string" || !s.trim() || FILLER.test(s)) return null;
+  return sentenceCase(s.trim().replace(/\s+/g, " "));
 }
 
 /** Rules-based region guess from text, source and community. */
