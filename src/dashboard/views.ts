@@ -3,13 +3,13 @@ import { Env, daysAgo } from "../lib";
 import { risingTopics, opportunities, regionSql, RegionFilter, RELEVANT_SQL } from "../analysis";
 import { checkHealth } from "../health";
 
-const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
-const topicLabel = (id: string) => TOPICS.find((t) => t.id === id)?.label || id;
+export const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+export const topicLabel = (id: string) => TOPICS.find((t) => t.id === id)?.label || id;
 const SOURCE_LABELS: Record<string, string> = { youtube: "YouTube", serp_forum: "Reddit and forums", serp_discussions: "Google discussions", serp_paa: "People Also Ask", content_analysis: "Web mentions" };
 const sourceLabel = (s: string) => s.split(", ").map((x) => SOURCE_LABELS[x] || x).join(", ");
 const ratioText = (r: { ratio: number; baselineReady: boolean }) => (r.baselineReady ? `×${r.ratio.toFixed(1)} vs usual` : "baseline building");
 
-function spark(values: number[], w = 140, h = 28) {
+export function spark(values: number[], w = 140, h = 28) {
   const max = Math.max(1, ...values);
   const step = w / Math.max(1, values.length - 1);
   const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * (h - 2) - 1).toFixed(1)}`).join(" ");
@@ -19,7 +19,7 @@ function spark(values: number[], w = 140, h = 28) {
 }
 
 const NAV = [
-  ["/", "Today"], ["/questions", "Question bank"], ["/rising", "Rising topics"], ["/gaps", "Content gaps"], ["/myths", "Myths and claims"], ["/sources", "Sources and coverage"],
+  ["/", "Today"], ["/questions", "Question bank"], ["/rising", "Rising topics"], ["/gaps", "Content gaps"], ["/myths", "Myths and claims"], ["/reddit", "Reddit"], ["/sources", "Sources and coverage"],
 ];
 
 const qs = (lens?: string, region?: RegionFilter) => {

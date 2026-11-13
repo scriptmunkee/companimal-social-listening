@@ -48,6 +48,42 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0008_subreddits_now",
     sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('subreddits', datetime('now')), ('morning_when_ready', datetime('now'))`],
   },
+  {
+    name: "0009_reddit",
+    sql: [
+      // One row per Reddit thread (keyed by Reddit's own post id), updated on every sighting
+      `CREATE TABLE IF NOT EXISTS reddit_threads (
+        post_id TEXT PRIMARY KEY, project TEXT NOT NULL, subreddit TEXT, url TEXT, title TEXT, snippet TEXT,
+        created_at TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, seen_count INTEGER DEFAULT 1,
+        best_rank INTEGER, posts_count INTEGER, posts_count_prev INTEGER, posts_count_max INTEGER DEFAULT 0,
+        via TEXT, insight_done INTEGER DEFAULT 0)`,
+      `CREATE INDEX IF NOT EXISTS idx_rt_last ON reddit_threads(project, last_seen)`,
+      `CREATE INDEX IF NOT EXISTS idx_rt_sub ON reddit_threads(subreddit)`,
+      `CREATE INDEX IF NOT EXISTS idx_rt_ins ON reddit_threads(insight_done)`,
+      // Every sighting: which search found it, at what rank, with what comment count (growth history)
+      `CREATE TABLE IF NOT EXISTS reddit_thread_hits (
+        post_id TEXT NOT NULL, seen_date TEXT NOT NULL, query TEXT NOT NULL, rank INTEGER, posts_count INTEGER, via TEXT,
+        PRIMARY KEY (post_id, seen_date, query))`,
+      // AI reading of each thread: what it is, what's going on, what to write
+      `CREATE TABLE IF NOT EXISTS reddit_insights (
+        post_id TEXT PRIMARY KEY, kind TEXT, theme TEXT, pain_point TEXT, need TEXT, emotion TEXT,
+        content_angle TEXT, lens TEXT, topic TEXT, region TEXT, model TEXT, created_at TEXT)`,
+      `CREATE INDEX IF NOT EXISTS idx_ri_theme ON reddit_insights(theme)`,
+      // Daily snapshot of the week's conversation themes
+      `CREATE TABLE IF NOT EXISTS reddit_themes (
+        project TEXT NOT NULL, date TEXT NOT NULL, theme TEXT NOT NULL, summary TEXT, why TEXT, ideas_json TEXT,
+        thread_ids_json TEXT, thread_count INTEGER, sentiment TEXT, model TEXT, created_at TEXT,
+        PRIMARY KEY (project, date, theme))`,
+      // Topic searches run, so harvested questions aren't searched twice in a month
+      `CREATE TABLE IF NOT EXISTS reddit_queries (query TEXT PRIMARY KEY, source TEXT, last_run TEXT, runs INTEGER DEFAULT 0)`,
+      `CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, until TEXT NOT NULL)`,
+    ],
+  },
+  {
+    // Fold earlier Reddit results into the registry, then run the full Reddit sweep now
+    name: "0010_reddit_now",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('reddit_backfill_items', datetime('now')), ('reddit_now', datetime('now')), ('reddit_themes_when_ready', datetime('now'))`],
+  },
 ];
 
 let checked = false;

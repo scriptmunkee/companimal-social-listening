@@ -111,13 +111,17 @@ ${batch.map((b) => JSON.stringify({ id: b.id, source: b.source, title: b.title.s
 }
 
 
-async function urlMatch(env: Env, q: string): Promise<{ url: string | null; score: number }> {
+export async function loadSiteUrls(env: Env): Promise<{ url: string; tokens: string[] }[]> {
+  const rows = await env.DB.prepare(`SELECT url, tokens FROM site_urls WHERE project=?1`).bind(PROJECT.id).all<any>();
+  return (rows.results || []).map((r: any) => ({ url: r.url, tokens: matchTokens(r.tokens) }));
+}
+
+export function urlMatch(site: { url: string; tokens: string[] }[], q: string): { url: string | null; score: number } {
   const qt = new Set(matchTokens(q));
   if (!qt.size) return { url: null, score: 0 };
-  const rows = await env.DB.prepare(`SELECT url, tokens FROM site_urls WHERE project=?1`).bind(PROJECT.id).all<any>();
   let best: string | null = null, bestScore = 0;
-  for (const r of rows.results || []) {
-    const ut = matchTokens(r.tokens);
+  for (const r of site) {
+    const ut = r.tokens;
     const overlap = ut.filter((w) => qt.has(w)).length;
     if (overlap < 2) continue; // one shared word is not coverage
     const score = overlap / Math.max(2, Math.min(qt.size, ut.length));
@@ -150,6 +154,7 @@ export async function enrichItems(env: Env, limit = 200) {
   }
 
   const validTopics = new Set(TOPICS.map((t) => t.id));
+  const site = await loadSiteUrls(env);
   const stmts: D1PreparedStatement[] = [];
   for (const it of items) {
     const h = heuristic(it.title, it.text);
@@ -169,7 +174,7 @@ export async function enrichItems(env: Env, limit = 200) {
     // PAA titles are questions by definition
     if (it.source === "serp_paa") { e.kind = "question"; e.question = clean(it.title, 240); }
     if (e.kind === "irrelevant" || wordCount(e.question) < 4) e.question = null;
-    const m = e.question || !["other", "irrelevant"].includes(e.kind) ? await urlMatch(env, `${e.question || it.title}`) : { url: null, score: 0 };
+    const m = e.question || !["other", "irrelevant"].includes(e.kind) ? urlMatch(site, `${e.question || it.title}`) : { url: null, score: 0 };
     stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO enrichments (item_id, kind, question, topic, lens, sentiment, matched_url, match_score, model, enriched_at, region) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`)
       .bind(it.id, e.kind, e.question, e.topic, e.lens, e.sentiment, m.url, m.score, e.model, nowIso(), region));
     stmts.push(env.DB.prepare(`UPDATE items SET enriched=1 WHERE id=?1`).bind(it.id));

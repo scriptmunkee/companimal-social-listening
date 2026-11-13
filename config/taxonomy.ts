@@ -86,6 +86,46 @@ export const SUBREDDITS: { sub: string; filter?: string }[] = [
 ];
 export const SUBREDDIT_DEPTH = 30;
 
+// ---------------------------------------------------------------------------
+// Reddit (via Google's licensed index of Reddit; no direct Reddit access)
+// ---------------------------------------------------------------------------
+// Extra angles for subreddit searches, rotated daily so each subreddit is searched
+// from a few directions (Google returns only a handful of results per site: search).
+export const REDDIT_FACETS = ["puppy", "breeder", "rescue", "vet", "training", "advice", "help", "first time", "anxiety", "food", "aggressive", "insurance", "cost", "crate", "walk"];
+export const REDDIT_FACETS_PER_DAY = 2;
+
+// Topic searches that trigger Google's "Discussions and forums" block, which lists Reddit
+// threads WITH comment counts. Normal (not site:) searches, so 5x cheaper than site: ones.
+export const REDDIT_TOPIC_QUERIES: string[] = [
+  // Buyers
+  "how to find a reputable dog breeder uk", "questions to ask a breeder before buying a puppy", "puppy deposit before viewing is it normal",
+  "how to tell if a puppy is from a puppy farm", "puppy scam paid deposit", "is it better to adopt or buy a puppy",
+  "best dog breed for first time owner uk", "best dog breed for family with young kids", "hypoallergenic dog breeds that actually work",
+  "cockapoo vs cavapoo which is better", "how much should a puppy cost uk", "is pet insurance worth it for a puppy",
+  "regret getting a puppy", "puppy blues", "first week with a new puppy",
+  // New owners
+  "puppy crying in crate at night", "puppy biting everything", "puppy toilet training not working",
+  "when can my puppy go outside after vaccinations", "how long can a puppy be left alone", "puppy won't sleep through the night",
+  "puppy socialisation before vaccinations", "puppy pulling on lead", "recall training not working",
+  "dog separation anxiety help", "reactive dog on walks", "dog barking at everything",
+  "dog bit me what should i do", "rescue dog settling in", "dog scared of fireworks",
+  "how much to feed a puppy", "raw feeding vs kibble", "dog eats everything on walks",
+  "best way to groom a doodle", "dog vet bills too expensive", "dog insurance claim rejected",
+  // Breeders
+  "selling puppies tips for breeders", "where to advertise puppies uk", "how to vet puppy buyers",
+  "puppy buyers time wasters", "do i need a licence to breed dogs uk", "first litter what to expect",
+  "whelping puppies advice", "puppy contract what to include", "breeder keeping in touch with puppy owners",
+  "breeding my dog once is it worth it", "kennel club registration worth it", "health testing before breeding",
+  // Rescue and rehoming
+  "rehoming my dog guilt", "how to rehome a dog responsibly uk", "rescue rejected our application",
+  "adopting a rescue dog uk experience", "foster to adopt dog", "dog returned to rescue",
+  // UK specifics
+  "dog friendly uk", "xl bully ban", "dog theft uk", "dog walker cost uk", "doggy daycare worth it",
+];
+export const REDDIT_TOPIC_PER_DAY = 20;     // rotate through the bank
+export const REDDIT_SNOWBALL_PER_DAY = 10;  // plus fresh questions harvested from Reddit itself
+export const REDDIT_INSIGHTS_PER_RUN = 96;  // threads analysed per 10-minute run
+
 export const SERP_PAA_QUERIES: string[] = [
   "buying a puppy",
   "how to sell puppies",

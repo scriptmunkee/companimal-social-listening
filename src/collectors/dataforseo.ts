@@ -1,6 +1,7 @@
 import { PROJECT, SUBREDDITS, SUBREDDIT_DEPTH, SERP_FORUM_QUERIES, SERP_FORUM_PER_DAY, SERP_PAA_QUERIES, CONTENT_ANALYSIS_KEYWORDS, CONTENT_ANALYSIS_LIMIT, UK_FORUM_DOMAINS } from "../../config/taxonomy";
 import { Env, Item, archiveRaw, saveItems, nowIso, clean, dayOfYear } from "../lib";
 import { mockSerp, mockContentAnalysis } from "../mock";
+import { redditHitsFromSerp, recordRedditHits, parseRedditUrl } from "./reddit";
 
 const API = "https://api.dataforseo.com/v3";
 const FORUM_DOMAINS = ["reddit.com", "quora.com", "dogforum", "forum", "boards.", "community.", ...UK_FORUM_DOMAINS];
@@ -63,7 +64,7 @@ function subredditOf(url: string): string | null {
 export function serpToItems(result: any, kind: string, query: string): Item[] {
   const out: Item[] = [];
   for (const el of result?.items || []) {
-    if (el.type === "organic" && el.url && isForum(el.url)) {
+    if (el.type === "organic" && el.url && isForum(el.url) && !parseRedditUrl(el.url)) {
       out.push({ source: "serp_forum", source_id: el.url.replace(/\?.*$/, ""), url: el.url, title: clean(String(el.title || "").replace(/\s*:\s*r\/\w+\s*$/i, ""), 300), text: clean(el.description), community: subredditOf(el.url) || el.domain, query, published_at: el.timestamp || null });
     }
     if (el.type === "people_also_ask") {
@@ -74,7 +75,7 @@ export function serpToItems(result: any, kind: string, query: string): Item[] {
     }
     if (el.type === "discussions_and_forums") {
       for (const d of el.items || []) {
-        if (!d.url) continue;
+        if (!d.url || parseRedditUrl(d.url)) continue;
         out.push({ source: "serp_discussions", source_id: d.url, url: d.url, title: clean(d.title, 300), text: clean(d.description || d.snippet), community: subredditOf(d.url) || d.source || d.domain || null, query });
       }
     }
@@ -103,7 +104,7 @@ export async function postSubredditTasks(env: Env) {
 
 /** Collect finished SERP tasks from the standard queue. */
 export async function collectSerpTasks(env: Env) {
-  const pending = await env.DB.prepare(`SELECT task_id, kind, query FROM serp_tasks WHERE fetched_at IS NULL AND project=?1 ORDER BY posted_at LIMIT 60`).bind(PROJECT.id).all<any>();
+  const pending = await env.DB.prepare(`SELECT task_id, kind, query FROM serp_tasks WHERE fetched_at IS NULL AND project=?1 ORDER BY posted_at LIMIT 100`).bind(PROJECT.id).all<any>();
   let added = 0, seen = 0;
   for (const t of pending.results || []) {
     let result: any;
@@ -124,7 +125,9 @@ export async function collectSerpTasks(env: Env) {
       result = task.result?.[0];
     }
     const key = await archiveRaw(env, "serp", `${t.kind}-${t.query}`, raw);
-    const r = await saveItems(env, serpToItems(result, t.kind, t.query), key);
+    // Reddit threads from any search go to the thread registry (one item per thread)
+    const redditItems = await recordRedditHits(env, redditHitsFromSerp(result), t.query);
+    const r = await saveItems(env, [...serpToItems(result, t.kind, t.query), ...redditItems], key);
     added += r.added; seen += r.seen;
     await env.DB.prepare(`UPDATE serp_tasks SET fetched_at=?2 WHERE task_id=?1`).bind(t.task_id, nowIso()).run();
   }

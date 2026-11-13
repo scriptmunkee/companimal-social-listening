@@ -115,3 +115,17 @@ export async function recordQueryVersion(env: Env, config: unknown) {
   await env.DB.prepare(`INSERT OR IGNORE INTO query_versions (version, project, first_seen, config_json) VALUES (?1, ?2, ?3, ?4)`)
     .bind(QUERY_VERSION, PROJECT.id, nowIso(), JSON.stringify(config)).run();
 }
+
+/**
+ * Run fn only if no other invocation holds the named lock (stops overlapping cron runs
+ * from processing the same rows twice). The lock expires on its own after ttlSeconds.
+ */
+export async function withLock<T>(env: Env, name: string, ttlSeconds: number, fn: () => Promise<T>): Promise<T | null> {
+  const now = new Date().toISOString();
+  const until = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  const r = await env.DB.prepare(
+    `INSERT INTO locks (name, until) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET until=excluded.until WHERE locks.until < ?3`
+  ).bind(name, until, now).run();
+  if (!r.meta?.changes) return null;
+  try { return await fn(); } finally { await env.DB.prepare(`DELETE FROM locks WHERE name=?1`).bind(name).run(); }
+}

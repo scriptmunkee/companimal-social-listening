@@ -27,11 +27,12 @@ A social listening tool for **Companimal** (companimal.co.uk), a UK puppy market
 | `/rising` | Topics this week vs their own 4-week baseline (baseline switches on after 3 weeks of data; handle that state gracefully) |
 | `/gaps` | Topic coverage vs Companimal's content URLs, biggest gaps |
 | `/myths` | Claims owners repeat that may be untrue (Dog Data Library article candidates) |
+| `/reddit` | Reddit intelligence: weekly conversation themes (summary, why it matters, article ideas, example threads), threads ranked by a "doing well" score (comments, comment growth, repeat sightings, Google rank, freshness) with sort Hot / Most discussed / Newest, filters by subreddit, kind (question, advice request, vent, story, debate...) and window (7/30/90 days), per-thread theme, pain point, emotion, need and content angle with "Send to pipeline", pain points, content angles, emotion mix, subreddit leaderboard. Source is Google's index of Reddit: comment counts yes, comment text no; say so honestly in the UI |
 | `/sources` | Best communities (question rate, UK %, off-topic %), UK YouTube channel status, run log with costs |
 
 Global filters that must persist across every view: **audience lens** (`?lens=buyer|breeder|rescue|owner`) and **region** (`?region=all`, default UK only). Read `layout()` for current behaviour.
 
-Existing JSON: `GET /api/opportunities?days=30&lens=…&region=all`, `GET /api/rising`, `GET /api/health`, `GET /api/pipeline`, `POST /api/pipeline {topic, question}`.
+Existing JSON: `GET /api/opportunities?days=30&lens=…&region=all`, `GET /api/rising`, `GET /api/health`, `GET /api/pipeline`, `POST /api/pipeline {topic, question}`, `GET /api/reddit/threads?days=7&sub=dogs&kind=vent&topic=…&limit=200` (threads with insights and score), `GET /api/reddit/themes` (latest themes snapshot plus available dates). Reddit server code: `src/dashboard/reddit.ts` (view), `src/collectors/reddit.ts` (data, `threadScore`), `src/reddit-insights.ts` (AI). Reddit is the flagship channel right now: give it the most design attention after Today.
 
 ## Ideas worth building (your call)
 

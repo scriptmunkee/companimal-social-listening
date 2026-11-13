@@ -29,10 +29,13 @@ export function mockSerp(kind: string, query: string) {
   const items: any[] = [];
   for (let i = 0; i < 6; i++) {
     const t = pick(SAMPLES);
-    items.push({ type: "organic", url: `https://www.reddit.com/r/${pick(["dogs", "puppy101", "AskUK", "DogAdvice"])}/comments/${Math.floor(rnd() * 1e6)}/x`, domain: "www.reddit.com", title: t, description: t });
+    items.push({ type: "organic", rank_group: i + 1, url: `https://www.reddit.com/r/${pick(["dogs", "puppy101", "AskUK", "DogAdvice"])}/comments/${Math.floor(rnd() * 1e5).toString(36)}/x`, domain: "www.reddit.com", title: `${t} : r/dogs`, description: `5 hours ago — ${t}`, timestamp: new Date(Date.now() - rnd() * 3e8).toISOString() });
   }
   if (kind === "paa") items.push({ type: "people_also_ask", items: [0, 1, 2].map(() => { const t = pick(SAMPLES.filter((s) => s.includes("?"))); return { title: t.split("?")[0] + "?", expanded_element: [{ url: "https://www.example.co.uk/guide", domain: "www.example.co.uk", description: "Answer text" }] }; }) });
-  items.push({ type: "discussions_and_forums", items: [0, 1].map(() => ({ url: `https://www.mumsnet.com/talk/${Math.floor(rnd() * 1e6)}`, title: pick(SAMPLES), source: "Mumsnet" })) });
+  items.push({ type: "discussions_and_forums", rank_absolute: 5, items: [
+    ...[0, 1].map(() => ({ url: `https://www.mumsnet.com/talk/${Math.floor(rnd() * 1e6)}`, title: pick(SAMPLES), source: "Mumsnet" })),
+    ...[0, 1, 2].map(() => ({ url: `https://www.reddit.com/r/${pick(["puppy101", "dogs", "Dogtraining"])}/comments/${Math.floor(rnd() * 1e5).toString(36)}/x/`, title: pick(SAMPLES), source: "Reddit", posts_count: Math.floor(rnd() * 300), timestamp: new Date(Date.now() - rnd() * 6e8).toISOString() })),
+  ] });
   return { cost: 0, tasks: [{ status_code: 20000, result: [{ keyword: query, items }] }] };
 }
 

@@ -1,0 +1,119 @@
+// AI reading of Reddit threads: what each one is really about, and the week's conversation themes.
+import { PROJECT, TOPICS, REDDIT_INSIGHTS_PER_RUN } from "../config/taxonomy";
+import { Env, nowIso, today, daysAgo, clean } from "./lib";
+import { runAi, regionOf, heuristic } from "./enrich";
+import { threadScore } from "./collectors/reddit";
+
+const KINDS = ["question", "advice_request", "vent", "story", "celebration", "debate", "recommendation_request", "myth", "news", "other", "irrelevant"];
+const EMOTIONS = ["worried", "frustrated", "sad", "happy", "proud", "curious", "angry", "guilty", "overwhelmed", "neutral"];
+const LENSES = ["buyer", "breeder", "rescue", "owner"];
+const REGIONS = ["uk", "non_uk", "unknown"];
+
+function insightPrompt(batch: any[]) {
+  const topics = TOPICS.map((t) => t.id).join(", ");
+  return `You read Reddit threads about dogs to inform content strategy for Companimal, a UK puppy marketplace for buyers, breeders, rescues and rehomers.
+You only have each thread's title, Google's snippet of the post and its comment count. Judge what the conversation is about.
+For each thread return an object:
+- id: the given id
+- kind: one of ${KINDS.join(", ")}. "irrelevant" for anything not genuinely about dogs or dog ownership (memes, megathread boilerplate, off-topic).
+- theme: a short, specific conversation theme in 2 to 5 words, reusable across threads (e.g. "Crate training night crying", "Fear after a bite", "Breeder deposit worries"), UK English
+- pain_point: the underlying problem or worry in one short sentence, or null
+- need: what the poster wants (reassurance, step-by-step help, a recommendation, validation, to share joy...), a few words
+- emotion: one of ${EMOTIONS.join(", ")}
+- content_angle: one article title Companimal could publish that would genuinely help people like this poster, UK English, keyword before any colon, or null if none fits
+- lens: buyer, breeder, rescue or owner
+- topic: one of [${topics}]
+- region: "uk" only with clear UK signals (£, UK places, UK spelling and terms), "non_uk" with clear non-UK signals ($, US states, "shots"), else "unknown"
+Return ONLY a JSON array.
+
+Threads:
+${batch.map((t) => JSON.stringify({ id: t.post_id, subreddit: `r/${t.subreddit}`, comments: t.posts_count, title: (t.title || "").slice(0, 200), snippet: (t.snippet || "").slice(0, 500) })).join("\n")}`;
+}
+
+/** Analyse threads that have no insight yet. Runs every 10 minutes; cheap when there's nothing new. */
+export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER_RUN) {
+  const rows = (await env.DB.prepare(`SELECT post_id, subreddit, url, title, snippet, posts_count FROM reddit_threads WHERE project=?1 AND insight_done=0 ORDER BY COALESCE(posts_count,0) DESC, last_seen DESC LIMIT ?2`).bind(PROJECT.id, limit).all<any>()).results || [];
+  if (!rows.length) return { added: 0, seen: 0, note: "nothing new" };
+  const out = new Map<string, any>();
+  let model = "heuristic";
+  if (env.AI && env.MOCK !== "1") {
+    for (let i = 0; i < rows.length; i += 12) {
+      try {
+        const [arr, used] = await runAi(env, insightPrompt(rows.slice(i, i + 12)), 3500);
+        for (const r of arr) if (r?.id && KINDS.includes(r.kind)) out.set(String(r.id), r);
+        model = used;
+      } catch (e) { console.error("reddit insight batch failed", String((e as any)?.message || e)); }
+    }
+  }
+  const validTopics = new Set(TOPICS.map((t) => t.id));
+  const stmts: D1PreparedStatement[] = [];
+  let ai = 0;
+  for (const t of rows) {
+    const r = out.get(t.post_id);
+    const ukSub = /^(askuk|casualuk|unitedkingdom|uk)$/i.test(t.subreddit || "");
+    const ruleRegion = ukSub ? "uk" : regionOf(`${t.title} ${t.snippet}`, t.url, `r/${t.subreddit}`, null);
+    if (!r && env.AI && env.MOCK !== "1") continue; // AI failed for this one: leave it for the next run
+    const h = heuristic(t.title || "", t.snippet || "");
+    const ins = r ? {
+      kind: r.kind, theme: clean(r.theme, 60), pain_point: clean(r.pain_point, 240), need: clean(r.need, 80),
+      emotion: EMOTIONS.includes(r.emotion) ? r.emotion : "neutral", content_angle: clean(r.content_angle, 160),
+      lens: LENSES.includes(r.lens) ? r.lens : h.lens, topic: validTopics.has(r.topic) ? r.topic : h.topic,
+      region: ruleRegion !== "unknown" ? ruleRegion : REGIONS.includes(r.region) ? r.region : "unknown", model,
+    } : {
+      kind: h.kind === "irrelevant" ? "irrelevant" : h.question ? "question" : "other", theme: TOPICS.find((x) => x.id === h.topic)?.label || null,
+      pain_point: null, need: null, emotion: "neutral", content_angle: null, lens: h.lens, topic: h.topic, region: ruleRegion, model: "heuristic",
+    };
+    if (r) ai++;
+    stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO reddit_insights (post_id, kind, theme, pain_point, need, emotion, content_angle, lens, topic, region, model, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
+      .bind(t.post_id, ins.kind, ins.theme, ins.pain_point, ins.need, ins.emotion, ins.content_angle, ins.lens, ins.topic, ins.region, ins.model, nowIso()));
+    stmts.push(env.DB.prepare(`UPDATE reddit_threads SET insight_done=1 WHERE post_id=?1`).bind(t.post_id));
+  }
+  for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));
+  return { added: stmts.length / 2, seen: rows.length, note: `ai=${ai}` };
+}
+
+/** Group the last 7 days of threads into conversation themes. Daily snapshot, kept for trend history. */
+export async function buildRedditThemes(env: Env) {
+  const rows = (await env.DB.prepare(`
+    SELECT t.post_id, t.subreddit, t.title, t.posts_count, t.posts_count_prev, t.seen_count, t.best_rank, t.created_at, t.first_seen,
+           i.theme, i.pain_point, i.kind, i.emotion
+    FROM reddit_threads t JOIN reddit_insights i ON i.post_id=t.post_id
+    WHERE t.project=?1 AND t.last_seen >= ?2 AND i.kind NOT IN ('irrelevant') AND COALESCE(i.region,'unknown') <> 'non_uk'`).bind(PROJECT.id, daysAgo(7)).all<any>()).results || [];
+  if (rows.length < 5) return { added: 0, seen: rows.length, note: "not enough threads yet" };
+  const ranked = rows.map((r: any) => ({ ...r, score: threadScore(r) })).sort((a: any, b: any) => b.score - a.score).slice(0, 120);
+  let themes: any[] = [];
+  let model = "rules";
+  if (env.AI && env.MOCK !== "1") {
+    const prompt = `These are this week's most active Reddit dog threads (UK and unknown-location), with an AI theme label per thread.
+Group them into 6 to 12 conversation themes that a content strategist for Companimal (UK puppy marketplace: buyers, breeders, rescues, rehomers) should know about.
+For each theme return: {"theme": short label, "summary": 1 to 2 sentences on what people are saying, "why": why it matters for Companimal's content, "ideas": [2 article titles, UK English, keyword before any colon], "sentiment": "positive" | "mixed" | "negative", "thread_ids": [ids of threads in this theme]}.
+Order themes by how much conversation they carry (comments and thread count). Return ONLY a JSON array.
+
+id | subreddit | comments | theme | pain point | title
+${ranked.map((r: any) => `${r.post_id} | r/${r.subreddit} | ${r.posts_count ?? "?"} | ${r.theme || ""} | ${(r.pain_point || "").slice(0, 90)} | ${(r.title || "").slice(0, 110)}`).join("\n")}`;
+    try {
+      const [arr, used] = await runAi(env, prompt, 3500, 0.2);
+      themes = arr.filter((t) => t && typeof t.theme === "string" && Array.isArray(t.thread_ids));
+      if (themes.length) model = used;
+    } catch (e) { console.error("reddit themes failed", String((e as any)?.message || e)); }
+  }
+  if (!themes.length) {
+    // Rules fallback: group by the per-thread theme label
+    const by = new Map<string, any[]>();
+    for (const r of ranked) { const k = r.theme || "Other"; by.set(k, [...(by.get(k) || []), r]); }
+    themes = [...by.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 10).map(([theme, list]) => ({
+      theme, summary: `${list.length} threads this week.`, why: "", ideas: [], sentiment: "mixed", thread_ids: list.map((x: any) => x.post_id),
+    }));
+  }
+  const valid = new Set(ranked.map((r: any) => r.post_id));
+  const date = today();
+  const stmts = [env.DB.prepare(`DELETE FROM reddit_themes WHERE project=?1 AND date=?2`).bind(PROJECT.id, date)];
+  for (const t of themes) {
+    const ids = (t.thread_ids || []).map(String).filter((id: string) => valid.has(id));
+    if (!ids.length) continue;
+    stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO reddit_themes (project, date, theme, summary, why, ideas_json, thread_ids_json, thread_count, sentiment, model, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`)
+      .bind(PROJECT.id, date, clean(t.theme, 80), clean(t.summary, 400), clean(t.why, 300), JSON.stringify((t.ideas || []).slice(0, 3)), JSON.stringify(ids), ids.length, ["positive", "mixed", "negative"].includes(t.sentiment) ? t.sentiment : "mixed", model, nowIso()));
+  }
+  await env.DB.batch(stmts);
+  return { added: stmts.length - 1, seen: ranked.length, note: model };
+}
