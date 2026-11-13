@@ -46,7 +46,7 @@ Existing JSON: `GET /api/opportunities?days=30&lens=…&region=all`, `GET /api/r
 ## Brand and owner preferences (these override ui-craft where they conflict)
 
 - **Light mode only.** The owner dislikes dark UIs. No dark mode toggle.
-- **Companimal brand:** warm cream `#F8F4EE`, marmalade terracotta `#C8552D`, near-black ink `#1A1614`, deep forest green `#2F4A3A`, warm grey `#766F61`, light sand `#E8E4DD`, paper `#FFFFFF` for raised surfaces only. Display face **Fraunces** (brand serif). Pick a non-banned UI sans and a mono per ui-craft. Characterful, grown-up, trustworthy; not corporate, not childish. No paw prints, hearts, bones, gradients or drop shadows.
+- **Companimal brand:** warm cream `#F8F4EE`, marmalade terracotta `#C8552D`, near-black ink `#1A1614`, deep forest green `#2F4A3A`, warm grey `#766F61`, light sand `#E8E4DD`, paper `#FFFFFF` for raised surfaces only. Display face **Instrument Serif**. **Never use Fraunces** (owner's instruction, overrides the brand guide). Pick a non-banned UI sans and a mono per ui-craft. Characterful, grown-up, trustworthy; not corporate, not childish. No paw prints, hearts, bones, gradients or drop shadows.
 - Terracotta is the 2% accent: primary actions and active states only.
 - **UK English** in all copy. **Never use double hyphens ("--")** in any copy or UI text.
 - Varied formats over walls of text: tables, ranked lists, compact cards.
@@ -94,7 +94,7 @@ Before outputting code, write a concise 4-line architectural spec:
 ### Phase 2: Hard visual constraints (zero exceptions)
 
 **Banned defaults**
-- Fonts: never Inter, Roboto, Open Sans or system defaults. Load expressive Google Fonts (e.g. Instrument Serif, Plus Jakarta Sans, Space Grotesk, Geist, Syne, JetBrains Mono, Newsreader). Fraunces stays as the brand display face.
+- Fonts: never Inter, Roboto, Open Sans or system defaults. Load expressive Google Fonts (e.g. Instrument Serif, Plus Jakarta Sans, Space Grotesk, Geist, Syne, JetBrains Mono, Newsreader). Never Fraunces either (owner's instruction).
 - Colours: never Tailwind default indigo-500, purple-600 or cyan-to-purple gradients.
 - Shadows: never heavy drop shadows. Use 1px crisp borders and subtle surface-colour steps for elevation.
 

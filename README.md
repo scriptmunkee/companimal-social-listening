@@ -35,7 +35,7 @@ Every morning a health check looks at the last 26 hours. If any job failed, didn
 
 ## Dashboard
 
-Server-rendered from `src/dashboard/` (no build step): `ui.ts` holds the design tokens, page shell and components, `views.ts` the pages, `data.ts` read-only query helpers, `client.ts` the small client script. Light mode, Companimal palette, Fraunces with Instrument Sans and JetBrains Mono.
+Server-rendered from `src/dashboard/` (no build step): `ui.ts` holds the design tokens, page shell and components, `views.ts` the pages, `data.ts` read-only query helpers, `client.ts` the small client script. Light mode, Companimal palette, Instrument Serif with Instrument Sans and JetBrains Mono (never Fraunces).
 
 Every view keeps the **audience** (`?lens=buyer|breeder|rescue|owner`) and **region** (`?region=all`, default UK only) filters.
 

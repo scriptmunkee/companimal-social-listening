@@ -1,8 +1,8 @@
 // Shared UI: design tokens, page shell, and small server-rendered components.
 // Design spec (ui-craft phase 1):
 // 1. Aesthetic: editorial morning paper for content planning. Cream newsprint canvas,
-//    Fraunces headlines, ruled hairline columns, ranked league-table lists.
-// 2. Type: Fraunces (display) + Instrument Sans (UI, true tabular figures) + JetBrains Mono (timestamps, keys).
+//    Instrument Serif headlines, ruled hairline columns, ranked league-table lists.
+// 2. Type: Instrument Serif (display; never Fraunces) + Instrument Sans (UI, true tabular figures) + JetBrains Mono (timestamps, keys).
 // 3. Surfaces: cream canvas, paper only for raised surfaces, 1px sand hairlines, tonal wells. No shadows.
 // 4. Signature: "Send to pipeline" presses down and inks into a forest "Queued" stamp; a terracotta
 //    rule tracks the focused row as you move with j and k.
@@ -140,7 +140,7 @@ export function layout(ctx: Ctx, title: string, body: string, mh: Masthead) {
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%231A1614%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%227%22 fill=%22none%22 stroke=%22%23C8552D%22 stroke-width=%224%22 stroke-dasharray=%2233 44%22 transform=%22rotate(45 16 16)%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>${CSS}</style></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="mast">
@@ -168,7 +168,7 @@ export function layout(ctx: Ctx, title: string, body: string, mh: Masthead) {
 
 const CSS = `
 :root{--cream:#F8F4EE;--well:#F2ECE3;--well-2:#EBE4D9;--paper:#FFFFFF;--sand:#E8E4DD;--rule:#D9D2C6;--grey:#766F61;--ink:#1A1614;--ink-2:#3D3732;--forest:#2F4A3A;--forest-tint:#E4EBE5;--terra:#C8552D;--terra-ink:#A8441F;--terra-tint:#F7E4DA;
---display:"Fraunces",Georgia,serif;--sans:"Instrument Sans",ui-sans-serif,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace;--r:10px;--ease:cubic-bezier(.2,.7,.2,1)}
+--display:"Instrument Serif",Georgia,serif;--sans:"Instrument Sans",ui-sans-serif,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace;--r:10px;--ease:cubic-bezier(.2,.7,.2,1)}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--cream);color:var(--ink);font:400 14.5px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
 .wrap{max-width:1240px;margin:0 auto;padding-left:32px;padding-right:32px}
@@ -190,8 +190,8 @@ kbd{font:500 11px/1 var(--mono);border:1px solid var(--rule);border-bottom-width
 .status .dot{width:7px;height:7px;border-radius:50%;background:var(--forest)}
 .status.bad{color:var(--terra-ink)}.status.bad .dot{background:var(--terra)}.status.bad:hover{text-decoration:underline}
 .mast-main{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding-top:18px}
-.brand{font:600 30px/1 var(--display);letter-spacing:-.03em;text-decoration:none;display:flex;align-items:baseline;gap:0;padding-bottom:14px;white-space:nowrap}
-.brand b{color:var(--terra);font-weight:600}
+.brand{font:400 34px/1 var(--display);letter-spacing:-.02em;text-decoration:none;display:flex;align-items:baseline;gap:0;padding-bottom:14px;white-space:nowrap}
+.brand b{color:var(--terra);font-weight:400}
 .brand span{font:600 11px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin-left:12px;padding-left:12px;border-left:1px solid var(--rule)}
 .nav{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;margin-bottom:-1px}.nav::-webkit-scrollbar{display:none}
 .nav a{position:relative;padding:10px 12px 14px;text-decoration:none;color:var(--grey);font-weight:500;font-size:14px;white-space:nowrap;border-radius:6px 6px 0 0;transition:color .15s,background .15s}
@@ -212,9 +212,9 @@ kbd{font:500 11px/1 var(--mono);border:1px solid var(--rule);border-bottom-width
 
 /* Type */
 main{padding-top:32px;padding-bottom:80px}
-h1{font:500 44px/1.06 var(--display);letter-spacing:-.035em;margin:0;font-variation-settings:"opsz" 144}
-h2{font:500 24px/1.12 var(--display);letter-spacing:-.025em;margin:0;font-variation-settings:"opsz" 72}
-h3{font:500 18px/1.25 var(--display);letter-spacing:-.01em;margin:0}
+h1{font:400 50px/1.04 var(--display);letter-spacing:-.02em;margin:0}
+h2{font:400 28px/1.1 var(--display);letter-spacing:-.02em;margin:0}
+h3{font:400 20px/1.25 var(--display);letter-spacing:0;margin:0}
 .eyebrow{font:600 11px/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin:0 0 8px}
 .lede{color:var(--ink-2);font-size:15.5px;max-width:68ch;margin:10px 0 0}
 .page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;margin-bottom:28px}
@@ -227,7 +227,7 @@ h3{font:500 18px/1.25 var(--display);letter-spacing:-.01em;margin:0}
 .c-7{grid-column:span 7}.c-5{grid-column:span 5}.c-8{grid-column:span 8}.c-4{grid-column:span 4}.c-12{grid-column:span 12}.c-6{grid-column:span 6}.c-3{grid-column:span 3}
 .panel{background:var(--paper);border:1px solid var(--sand);border-radius:var(--r)}
 .hero{padding:28px 30px;display:flex;flex-direction:column;gap:18px;border-color:var(--rule)}
-.hero h2{font-size:34px;line-height:1.08;letter-spacing:-.03em;font-variation-settings:"opsz" 144}
+.hero h2{font-size:40px;line-height:1.05;letter-spacing:-.02em}
 .hero h2 a{text-decoration:none}.hero h2 a:hover{text-decoration:underline;text-decoration-thickness:1px}
 .hero .why{color:var(--ink-2);font-size:15.5px;margin:0;max-width:60ch}
 .h2list{margin:0;padding:0;list-style:none;border-top:1px solid var(--sand)}
@@ -242,7 +242,7 @@ h3{font:500 18px/1.25 var(--display);letter-spacing:-.01em;margin:0}
 .queue ol{list-style:none;margin:12px 0 0;padding:0}
 .queue li{display:grid;grid-template-columns:30px 1fr;gap:4px;padding:13px 0;border-top:1px solid var(--sand)}
 .queue li .n{font:500 12px/1.6 var(--mono);color:var(--grey)}
-.queue li .t{font:500 16px/1.3 var(--display);letter-spacing:-.01em;text-decoration:none}
+.queue li .t{font:400 19px/1.25 var(--display);text-decoration:none}
 .queue li a.t:hover{text-decoration:underline;text-decoration-thickness:1px}
 .queue li p{margin:4px 0 0;font-size:13px;color:var(--grey)}
 
@@ -334,7 +334,7 @@ tr:hover .btn-send.row,tr.focus .btn-send.row,.myth:hover .btn-send.row,.btn-sen
 
 /* States */
 .empty{border:1px dashed var(--rule);border-radius:var(--r);padding:36px 28px;text-align:center;color:var(--grey);background:transparent}
-.empty-t{font:500 18px/1.3 var(--display);color:var(--ink);margin:0 0 6px}
+.empty-t{font:400 21px/1.3 var(--display);color:var(--ink);margin:0 0 6px}
 .empty p{margin:0;max-width:56ch;margin-inline:auto}
 .notice{border:1px solid var(--sand);border-left:3px solid var(--forest);background:var(--paper);border-radius:6px;padding:12px 16px;font-size:14px;color:var(--ink-2);margin:0 0 18px}
 .alert{border:1px solid #EBC9B8;border-left:3px solid var(--terra);background:var(--terra-tint);border-radius:6px;padding:12px 16px;font-size:14px;margin:0 0 24px}
@@ -374,9 +374,9 @@ details.more>summary:hover{color:var(--ink)}
 /* Myths */
 .myth{display:grid;grid-template-columns:44px 1fr auto;gap:6px 16px;padding:18px 0;border-bottom:1px solid var(--sand)}
 .myth .rank{font:500 11.5px/2 var(--mono);color:var(--grey)}
-.myth .claim{font:500 18px/1.3 var(--display);letter-spacing:-.01em;margin:0}
+.myth .claim{font:400 21px/1.25 var(--display);margin:0}
 .myth .side{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
-.myth-teaser .claim{font-size:16px}
+.myth-teaser .claim{font-size:19px}
 
 /* Charts */
 .chart{display:block;width:100%;height:170px}
@@ -399,7 +399,7 @@ details.more>summary:hover{color:var(--ink)}
 .legend i{display:inline-block;width:14px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:6px}
 
 /* Detail */
-.detail h2.q{font-size:30px;line-height:1.1;letter-spacing:-.03em;margin:4px 0 16px;font-variation-settings:"opsz" 144}
+.detail h2.q{font-size:34px;line-height:1.08;letter-spacing:-.02em;margin:4px 0 16px}
 .detail .block{margin-top:26px}
 .detail .block>h3{font:600 11px/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--sand)}
 .detail .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:18px}
@@ -434,11 +434,11 @@ dialog.keys dt{white-space:nowrap}dialog.keys dd{margin:0;color:var(--ink-2)}
  .wrap{padding-left:18px;padding-right:18px}
  .c-7,.c-5,.c-8,.c-4,.c-6,.c-3{grid-column:span 12}
  .mast-main{flex-direction:column;align-items:flex-start;gap:6px;padding-top:14px}
- .brand{font-size:26px;padding-bottom:4px}
+ .brand{font-size:30px;padding-bottom:4px}
  .nav{width:calc(100% + 36px);margin-left:-18px;padding:0 10px}
  .mast-top{flex-wrap:wrap}.mast-top .mono:first-child{display:none}.mast-meta .mono{display:none}
- h1{font-size:34px}
- .hero{padding:22px}.hero h2{font-size:27px}
+ h1{font-size:40px}
+ .hero{padding:22px}.hero h2{font-size:31px}
  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
  .kpis>div{padding:14px 12px 14px 0}.kpis>div:nth-child(2n){border-right:0;padding-left:14px}.kpis>div:nth-child(2n+1){padding-left:0}.kpis>div:nth-child(n+3){border-top:1px solid var(--sand)}
  .kpis .v{font-size:27px}
@@ -451,7 +451,7 @@ dialog.keys dt{white-space:nowrap}dialog.keys dd{margin:0;color:var(--ink-2)}
  .q td.act{padding-left:0}
  .keys-btn{display:none}
  .myth{grid-template-columns:28px 1fr}.myth .side{grid-column:2;flex-direction:row;align-items:center;justify-content:space-between}
- .detail h2.q{font-size:25px}
+ .detail h2.q{font-size:28px}
  .drawer-body{padding:18px 18px 40px}
  .sec{margin-top:38px;flex-wrap:wrap}
  td.name{min-width:150px}
