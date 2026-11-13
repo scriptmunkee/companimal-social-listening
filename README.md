@@ -33,6 +33,24 @@ The repo is connected to Cloudflare Workers Builds: every push to `main` deploys
 
 Every morning a health check looks at the last 26 hours. If any job failed, didn't run, collected nothing, or the AI stopped responding (it falls back to a second model first), it emails `ALERT_EMAIL` from `alerts@companimal.co.uk` and shows a banner on the Today page. Silent when healthy. `GET /api/health` returns the current issues.
 
+## Reddit
+
+Reddit is read through **Google's index of Reddit** (via DataForSEO). The tool never calls Reddit directly: Reddit blocks automated access from servers and has closed its API to new users, and we don't work around that.
+
+| Layer | How | Gives |
+|---|---|---|
+| Fresh threads | Per subreddit, daily: `site:reddit.com/r/x` past day + past week + 2 rotating angles (`REDDIT_FACETS`) | New threads, title, snippet, posted time, Google rank |
+| Comment counts | ~60 topic searches (`REDDIT_TOPIC_QUERIES`) daily, plus 30 questions harvested from Reddit, plus re-running searches that recently surfaced commented threads | Google's Discussions and forums block lists Reddit threads with `posts_count` (comments); about 1 in 3 searches shows it |
+| Registry | `reddit_threads` keyed by Reddit post id; every sighting in `reddit_thread_hits` | Comment growth over time, repeat appearances, best rank |
+| Insights | Workers AI per thread (`reddit_insights`) | Kind (question, advice request, vent, story, debate...), theme, pain point, need, emotion, content angle, audience, topic, region |
+| Themes | Daily AI grouping of the week's threads (`reddit_themes`, one snapshot per day) | What people are talking about, why it matters, article ideas |
+
+"Doing well" score (`threadScore`): comments, comment growth, repeat sightings, Google rank and freshness.
+
+Not available: comment text and upvote scores. If proper Reddit data access is ever obtained (an approved Reddit Data API app or a licensed data provider), it can feed the same tables.
+
+Cost: roughly $0.24 a day for Reddit, most of it `site:` searches (DataForSEO charges those at 5x).
+
 ## Dashboard
 
 Server-rendered from `src/dashboard/` (no build step): `ui.ts` holds the design tokens, page shell and components, `views.ts` the pages, `data.ts` read-only query helpers, `client.ts` the small client script. Light mode, Companimal palette, Instrument Serif with Instrument Sans and JetBrains Mono (never Fraunces).
