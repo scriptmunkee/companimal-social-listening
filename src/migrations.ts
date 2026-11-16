@@ -179,6 +179,10 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     // Rebuild with every ref answered (rules fill what the AI leaves out)
     name: "0019_moves_rebuild",
     sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('insights_now', datetime('now'))`],
+  },  {
+    // Rebuild now that emoji no longer break the AI request
+    name: "0020_moves_rebuild",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('insights_now', datetime('now'))`],
   },
 ];
 

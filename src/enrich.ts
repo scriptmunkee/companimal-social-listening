@@ -45,6 +45,9 @@ export function aiText(out: any): unknown {
  */
 export async function runAi(env: Env, prompt: string, maxTokens: number, temperature = 0, models: string[] = [AI_MODEL, AI_FALLBACK_MODEL], valid: (a: any[]) => boolean = (a) => a.length > 0, timeoutMs = 90000): Promise<[any[], string]> {
   let lastErr: unknown = new Error("AI returned nothing usable");
+  // Titles cut to a length can split an emoji, leaving half a surrogate pair: Workers AI then rejects
+  // the whole request ("reason must be valid JSON"). Drop any unpaired surrogate before sending.
+  prompt = prompt.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
   for (const model of models) {
     try {
       const input = model.includes("gpt-oss")
