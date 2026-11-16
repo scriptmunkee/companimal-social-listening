@@ -166,6 +166,11 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
       `INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('site_pages', datetime('now')), ('insights_when_ready', datetime('now'))`,
     ],
   },
+  {
+    // First moves straight away from the current readings (rebuilt again when the re-read finishes)
+    name: "0017_moves_now",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('insights_now', datetime('now'))`],
+  },
 ];
 
 let checked = false;

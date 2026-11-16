@@ -103,6 +103,7 @@ async function runPending(env: Env) {
     }),
     reddit_now: () => runJob(env, "reddit_post", () => postRedditTasks(env, "full")),
     reddit_api_now: () => runJob(env, "reddit_post", () => collectRedditNow(env)),
+    insights_now: async () => { await runJob(env, "reddit_themes", () => buildRedditThemes(env)); await runJob(env, "insights", () => buildInsights(env)); },
 
   };
   // Jobs that wait for something before they can run (left queued until then)
