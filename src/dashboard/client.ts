@@ -22,6 +22,30 @@ function send(btn){
    .then(function(r){if(!r.ok)throw 0;stamp(btn);})
    .catch(function(){btn.disabled=false;btn.textContent='Retry send';btn.classList.add('failed');});
 }
+// Moves: status (Plan, Done, Dismiss with a reason) and briefs
+var LABEL={'new':'Open',planned:'Planned',done:'Done',dismissed:'Dismissed'};
+function post(u,b){return fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();});}
+function say(el,msg){var n=el.querySelector('.err-msg');if(!n){n=document.createElement('p');n.className='err-msg';el.appendChild(n);}n.textContent=msg;}
+document.addEventListener('click',function(e){
+  var s=e.target.closest('[data-set]');
+  if(s){var card=s.closest('[data-id]');if(!card)return;var st=s.dataset.set,why=card.querySelector('.why');
+    if(st==='dismissed'&&!s.dataset.reason){if(why){why.classList.toggle('open');var f=why.querySelector('.chip');if(why.classList.contains('open')&&f)f.focus();}return;}
+    var next=(card.dataset.status===st&&st!=='dismissed')?'new':st;
+    s.disabled=true;
+    post('/api/insights/'+card.dataset.id+'/status',{status:next,reason:s.dataset.reason||null}).then(function(){
+      card.dataset.status=next;if(why)why.classList.remove('open');
+      var l=document.querySelector('[data-status-label]');if(l)l.textContent=LABEL[next];
+      $$('[data-set]',card).forEach(function(x){if(!x.dataset.reason)x.setAttribute('aria-pressed',String(x.dataset.set===next));});
+      var p=card.querySelector('.planned');if(p&&next==='planned'){p.classList.remove('inked');void p.offsetWidth;p.classList.add('inked');}
+      var old=card.querySelector('.err-msg');if(old)old.remove();
+    }).catch(function(){say(card.querySelector('.ev')||card,'Could not save that. Try again.');}).then(function(){s.disabled=false;});
+    return;}
+  var br=e.target.closest('[data-brief]');
+  if(br){br.disabled=true;br.textContent='Drafting the brief';
+    post('/api/insights/'+br.dataset.brief+'/brief').then(function(){location.reload();})
+     .catch(function(){br.disabled=false;br.textContent='Draft the brief';say(br.parentElement,'The AI did not answer in time. Try again.');});
+    return;}
+});
 document.addEventListener('click',function(e){
   var b=e.target.closest('[data-send]');if(b){e.preventDefault();e.stopPropagation();send(b);return;}
   if(e.target.closest('[data-close]')){closeDrawer();return;}
@@ -59,7 +83,7 @@ document.addEventListener('keydown',function(e){
   var t=e.target,typing=t&&(t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA'||t.isContentEditable);
   if(e.key==='Escape'){if(!drawer.hidden){e.preventDefault();closeDrawer();}else if(typing){t.blur();}return;}
   if(typing||keys.open)return;
-  if(gPending){gPending=false;var m={t:'/',d:'/reddit',q:'/questions',r:'/rising',m:'/myths',g:'/gaps',s:'/sources',p:'/pipeline'};if(m[e.key]){e.preventDefault();go(m[e.key]);}return;}
+  if(gPending){gPending=false;var m={w:'/',d:'/demand',t:'/themes',c:'/coverage',q:'/questions',r:'/reddit',m:'/myths',s:'/sources',p:'/pipeline'};if(m[e.key]){e.preventDefault();go(m[e.key]);}return;}
   var k=e.key;
   if(k==='g'){gPending=true;setTimeout(function(){gPending=false},900);return;}
   if(k==='?'){e.preventDefault();keys.showModal();return;}
@@ -72,6 +96,9 @@ document.addEventListener('keydown',function(e){
   if(k==='s'){var b=r.querySelector('[data-send]');if(b){e.preventDefault();send(b);}return;}
 });
 
+// The More menu closes when you click elsewhere or press Escape
+document.addEventListener('click',function(e){$$('details.navmore[open]').forEach(function(d){if(!d.contains(e.target))d.removeAttribute('open');});});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')$$('details.navmore[open]').forEach(function(d){d.removeAttribute('open');});});
 // Tooltips for chart marks
 function place(e){var x=e.clientX+14,y=e.clientY+14,w=tip.offsetWidth,h=tip.offsetHeight;if(x+w>innerWidth-8)x=e.clientX-w-14;if(y+h>innerHeight-8)y=e.clientY-h-14;tip.style.left=x+'px';tip.style.top=y+'px';}
 document.addEventListener('mouseover',function(e){var el=e.target.closest&&e.target.closest('[data-tip]');if(!el){tip.hidden=true;return;}tip.textContent=el.getAttribute('data-tip');tip.hidden=false;place(e);});

@@ -351,6 +351,12 @@ const MOCK_TITLES = [
   "8 week old puppy cries in the crate every night, does it get better?", "Breeder wants a £500 deposit before we can visit, normal?",
   "Rescue dog growls when we touch his food bowl", "We survived the puppy blues", "Is pet insurance worth it for a cockapoo?",
   "Recall training not working with my 6 month old spaniel", "Our first litter arrived today!", "How do you vet puppy buyers as a small breeder?",
+  "Looking for a reputable cockapoo breeder in Yorkshire, where do I start?", "How much should a cocker spaniel puppy cost? Breeder wants £2,200",
+  "Selling our first litter, where do people advertise puppies now?", "Looking for a stud for my golden retriever girl, fully health tested",
+  "Puppy terrified of fireworks, bonfire night is next week", "Is it true rescue dogs from Romania all have behaviour issues?",
+  "How big will my labradoodle get? 12 weeks and 9kg", "How much should I feed a 10 week old French bulldog?",
+  "Have to rehome my staffie because of a new baby, feeling awful", "Thinking of buying a puppy for Christmas, is it a bad idea?",
+  "Paid a deposit for a cavapoo and now the seller has gone quiet, scam?", "Do you really need to see the puppy with mum? Seller says she's at the vet",
 ];
 function mockResponse(path: string, params: Record<string, string | number | boolean>): any {
   const seed = [...JSON.stringify(params)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
@@ -370,7 +376,8 @@ function mockResponse(path: string, params: Record<string, string | number | boo
     return { success: true, results: Array.from({ length: 8 }, (_, i) => ({ id: `s${(n(i) % 46656).toString(36)}${i}`, title: MOCK_TITLES[n(i) % MOCK_TITLES.length], subreddit: ["puppy101", "dogs", "AskUK"][i % 3], permalink: null, position: i + 1 })) };
   }
   if (path === "/comments") {
-    const replies = ["It gets better by week three, cover the crate and keep it next to your bed.", "Totally normal, ours did the same. Hang in there.", "Never pay a deposit before seeing the pup with mum. That's a classic scam.", "Ask your vet, but we found a snuffle mat helped a lot."];
+    const replies = ["It gets better by week three, cover the crate and keep it next to your bed.", "Totally normal, ours did the same. Hang in there.", "Never pay a deposit before seeing the pup with mum. That's a classic scam.", "Ask your vet, but we found a snuffle mat helped a lot.",
+      "Actually that's a myth, plenty of rescues are lovely. Don't believe everything you read.", "Wrong advice above, never let a puppy cry it out for hours.", "Check the Kennel Club guide, there's a good page on what to ask breeders.", "We paid about £1,800 in Kent last spring, anything over £2,500 is daft."];
     return { success: true, post_id: params.post_id, total_comments: 30 + (seed % 40), count: 6,
       comments: Array.from({ length: 6 }, (_, i) => ({ id: `c${seed % 9999}${i}`, author: `u${i}`, body: replies[(seed + i) % replies.length], score: 40 - i * 5, depth: i % 2, parent_id: null, created_at: new Date(Date.now() - (10 - i) * 3600000).toISOString() })) };
   }

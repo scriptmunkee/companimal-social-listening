@@ -6,7 +6,7 @@ workers_dev = true
 preview_urls = false
 
 [triggers]
-# 02:00 collect, every 10 min pick up results + enrich, 06:30 rollup + brief + health (UTC)
+# 02:00 collect; every 10 min Reddit feeds and comments, AI reading; 06:30 themes, moves, health (Mondays: site pages and the weekly email). UTC
 crons = ["0 2 * * *", "*/10 * * * *", "30 6 * * *"]
 
 [[d1_databases]]
@@ -30,5 +30,9 @@ name = "ALERTS"
 [observability]
 enabled = true
 
+[vars]
+# Links in the Monday email
+DASHBOARD_URL = "https://companimal-social-listening.christopherkelly-00.workers.dev"
+
 # Secrets (set with `wrangler secret put`):
-# DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD, YOUTUBE_API_KEY, DASHBOARD_PASSWORD, HASH_SALT, ALERT_EMAIL
+# DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD, YOUTUBE_API_KEY, SERPENT_API_KEY, DASHBOARD_PASSWORD, HASH_SALT, ALERT_EMAIL

@@ -8,6 +8,8 @@ export interface Env {
   DATAFORSEO_PASSWORD?: string;
   YOUTUBE_API_KEY?: string;
   SERPENT_API_KEY?: string; // Reddit via apiserpent.com
+  SERPANT_API_KEY?: string; // same key under a common misspelling; accepted so a typo in the dashboard still works
+  DASHBOARD_URL?: string; // the Worker's own URL, for links in the Monday email
   DASHBOARD_PASSWORD?: string;
   HASH_SALT?: string;
   ALERTS?: SendEmail;
@@ -144,4 +146,30 @@ export async function inWaves<T>(batches: T[], concurrency: number, deadline: nu
     res.forEach((r, j) => { if (r.status === "fulfilled") done.add(i + j); });
   }
   return done;
+}
+
+
+export const hoursAgoIso = (h: number) => new Date(Date.now() - h * 3600000).toISOString();
+export const slug = (s: string) => s.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80);
+export const monthOf = (d = new Date()) => d.getUTCMonth() + 1;
+export const inSeason = (m: number, from: number, to: number) => (from <= to ? m >= from && m <= to : m >= from || m <= to);
+
+export async function batch(env: Env, stmts: D1PreparedStatement[], size = 80) {
+  for (let i = 0; i < stmts.length; i += size) await env.DB.batch(stmts.slice(i, i + size));
+}
+
+/** ISO week key, e.g. 2026-W47. */
+export function weekKey(d = new Date()): string {
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y = t.getUTCFullYear();
+  const w = Math.ceil(((t.getTime() - Date.UTC(y, 0, 1)) / 86400000 + 1) / 7);
+  return `${y}-W${String(w).padStart(2, "0")}`;
+}
+
+/** Normalise the environment once per invocation (accept SERPANT_API_KEY as the Serpent key). */
+export function prepareEnv(env: Env): Env {
+  if (env.SERPENT_API_KEY || !env.SERPANT_API_KEY) return env;
+  return { ...env, SERPENT_API_KEY: env.SERPANT_API_KEY };
 }

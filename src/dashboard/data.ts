@@ -24,9 +24,10 @@ export async function pipeline(env: Env, limit = 50, offset = 0) {
 
 /** Masthead numbers shown on every page, plus health issues. */
 export async function masthead(env: Env) {
-  const r = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM items WHERE project=?1) AS posts, (SELECT MIN(collected_date) FROM items WHERE project=?1) AS since, (SELECT COUNT(*) FROM pipeline_queue WHERE project=?1) AS queued`).bind(PROJECT.id).first<any>();
+  const r = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM items WHERE project=?1) AS posts, (SELECT MIN(collected_date) FROM items WHERE project=?1) AS since, (SELECT COUNT(*) FROM pipeline_queue WHERE project=?1) AS queued,
+    (SELECT MAX(finished_at) FROM runs WHERE project=?1 AND status='ok') AS updated`).bind(PROJECT.id).first<any>();
   const issues: HealthIssue[] = await checkHealth(env).catch(() => []);
-  return { posts: r?.posts || 0, since: r?.since || null, queued: r?.queued || 0, issues };
+  return { posts: r?.posts || 0, since: r?.since || null, queued: r?.queued || 0, updated: (r?.updated as string | null) || null, issues };
 }
 
 export async function kpis(env: Env, region: RegionFilter, lens?: string) {

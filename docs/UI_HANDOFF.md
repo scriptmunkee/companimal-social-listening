@@ -4,44 +4,41 @@ You own the dashboard UI for this repo. The data pipeline is done and live; your
 
 ## What the product is
 
-A social listening tool for **Companimal** (companimal.co.uk), a UK puppy marketplace connecting buyers with breeders, rescues and rehomers. Every day it collects what UK dog people ask and argue about (Reddit and UK forums via Google, People Also Ask, YouTube comments, UK web mentions), uses AI to pull out questions, topics, audience and region, and turns that into content opportunities. The owner uses it to decide what articles to write next. The archive grows for years, so seasonality and trends matter.
+A social listening tool for **Companimal** (companimal.co.uk), a UK puppy marketplace connecting buyers with breeders, rescues and rehomers. Every day it collects what UK dog people ask and argue about (Reddit via Serpent, YouTube, People Also Ask, UK forums, web mentions), reads it with AI, and every morning turns it into a short ranked list of **moves**: Finding, So what, Now what, each with a target page on companimal.co.uk, a priority and a type. The owner opens it to decide what to write, update or fix this week. The archive grows for years, so seasonality and trends matter.
 
-**Primary user:** Chris, an SEO consultant. He opens it most mornings to decide what to write. He is busy, technical and dislikes walls of text.
+**Primary user:** Chris, an SEO consultant. He opens it most mornings with ten minutes to decide. Busy, technical, dislikes walls of text. Decisions first, data a click behind.
 
 ## Architecture (don't change the data layer)
 
-- Cloudflare Worker, TypeScript, `src/index.ts` routes requests. No framework, no build step today.
-- Dashboard is server-rendered HTML in `src/dashboard/views.ts` (one `layout()` plus one function per view). Small inline script for the "Send to pipeline" buttons.
-- Data: D1 (SQLite). Read the schema in `migrations/*.sql` and `src/migrations.ts`. Query helpers live in `src/analysis.ts` (`opportunities`, `risingTopics`, `regionSql`, `RELEVANT_SQL`).
+- Cloudflare Worker, TypeScript, `src/index.ts` routes requests. No framework, no build step.
+- Dashboard is server-rendered HTML: `src/dashboard/ui.ts` (tokens, CSS, page shell, shared components), `moves.ts` (This week, one move, Demand, Themes, Coverage), `views.ts` and `reddit.ts` (data views), `data.ts` (query helpers), `client.ts` (status buttons, briefs, drawer, shortcuts, tooltips).
+- The insight layer is `src/insights.ts` (moves, status, briefs); site pages are `src/site.ts`. Schema in `migrations/*.sql` and `src/migrations.ts` (append only; never drop or rewrite a table).
 - Auth: HTTP basic auth on every route (`DASHBOARD_PASSWORD`). Keep it.
-- **Deploys are automatic:** every push to `main` builds and deploys via Cloudflare Workers Builds (deploy command `npx wrangler deploy`, no build command). If you add a framework or bundler, it must still work with `wrangler deploy` alone (Hono with JSX is fine; wrangler bundles it). Do not add a separate Pages app.
-- **Do not modify** collectors (`src/collectors/*`), enrichment (`src/enrich.ts`), health (`src/health.ts`), migrations, cron triggers or `config/taxonomy.ts` unless a UI need forces it, and then say why in the commit.
+- **Deploys are automatic:** every push to `main` builds and deploys via Cloudflare Workers Builds (deploy command `npx wrangler deploy`, no build command). Whatever you add must still work with `wrangler deploy` alone. Do not add a separate Pages app.
+- **Do not modify** collectors (`src/collectors/*`), enrichment (`src/enrich.ts`, `src/reddit-insights.ts`), the insight builder, health, migrations, cron triggers or `config/taxonomy.ts` unless a UI need forces it, and then say why in the commit.
 - You may add **read-only** JSON endpoints under `/api/` and new query helpers for the UI.
 
-## Views that must exist (improve freely)
+## Views (improve freely, keep the insights-first order)
 
 | Route | Purpose |
 |---|---|
-| `/` Today | Morning brief (AI content ideas), health banner, KPIs, rising topics with sparklines, top unanswered questions |
-| `/questions` | Question bank: grouped questions, mentions, engagement, sources, covered vs gap, score, search and topic filter, "Send to pipeline" |
-| `/rising` | Topics this week vs their own 4-week baseline (baseline switches on after 3 weeks of data; handle that state gracefully) |
-| `/gaps` | Topic coverage vs Companimal's content URLs, biggest gaps |
-| `/myths` | Claims owners repeat that may be untrue (Dog Data Library article candidates) |
-| `/reddit` | Reddit intelligence: weekly conversation themes (summary, why it matters, article ideas, example threads), threads ranked by a "doing well" score (comments, comment growth, repeat sightings, Google rank, freshness) with sort Hot / Most discussed / Newest, filters by subreddit, kind (question, advice request, vent, story, debate...) and window (7/30/90 days), per-thread theme, pain point, emotion, need and content angle with "Send to pipeline", pain points, content angles, emotion mix, subreddit leaderboard. Source is Google's index of Reddit: comment counts yes, comment text no; say so honestly in the UI |
-| `/sources` | Best communities (question rate, UK %, off-topic %), UK YouTube channel status, run log with costs |
+| `/` This week | Headline sentence built from the numbers (no KPI tile row), the dog year strip, the ranked ledger of moves with type and status filters. Aside: people ready to act, where it's coming from, spend |
+| `/move/{id}` | One move: finding, so what, Now what with the target page, Draft the brief, the brief, every piece of evidence, why it ranks, history |
+| `/demand` | Buyers, breeders, rehomers and adopters (last 14 days) by breed and against the fortnight before, linked to their moves |
+| `/themes` | Reddit conversation themes with coverage label, article ideas and the threads |
+| `/coverage` | Pages that need work, pages people are asking for, articles with nothing raised |
+| `/questions`, `/q` | Question bank and question detail (drawer) |
+| `/reddit` | Threads ranked by "doing well" (comments, upvotes, growth, age), with breed, intent, UK region and what the replies say |
+| `/sources` | Communities, UK YouTube channels, run log with costs |
+| Under More | `/rising`, `/myths`, `/gaps`, `/seasonality`, `/pipeline` |
 
-Global filters that must persist across every view: **audience lens** (`?lens=buyer|breeder|rescue|owner`) and **region** (`?region=all`, default UK only). Read `layout()` for current behaviour.
+Navigation is a quiet top tab row (no sidebar, no masthead). The audience (`?lens=`) and region (`?region=all`) filters show only on the data views.
 
-Existing JSON: `GET /api/opportunities?days=30&lens=…&region=all`, `GET /api/rising`, `GET /api/health`, `GET /api/pipeline`, `POST /api/pipeline {topic, question}`, `GET /api/reddit/threads?days=7&sub=dogs&kind=vent&topic=…&limit=200` (threads with insights and score), `GET /api/reddit/themes` (latest themes snapshot plus available dates). Reddit server code: `src/dashboard/reddit.ts` (view), `src/collectors/reddit.ts` (data, `threadScore`), `src/reddit-insights.ts` (AI). Reddit is the flagship channel right now: give it the most design attention after Today.
+Status buttons on every move: **Plan**, **Done**, **Dismiss** (asks why: Not relevant, Already covered, Not now, Wrong page). Tapping the pressed status again reopens the move. JSON: `GET /api/insights`, `POST /api/insights/{id}/status`, `POST /api/insights/{id}/brief`, plus the older `/api/opportunities`, `/api/rising`, `/api/health`, `/api/pipeline`, `/api/reddit/threads`, `/api/reddit/themes`.
 
-## Ideas worth building (your call)
+## Design system
 
-- Today as an editorial bento: one hero opportunity, ranked queue, rising topics strip, health as a quiet status line when fine.
-- Question detail drawer: every source post behind a grouped question (link out), suggested H2s, matched Companimal URL.
-- Topic pages: trend over time, top questions, myths, best communities for that topic.
-- Seasonality view (week-of-year heatmap) that shows an honest "builds after 12 months" state now.
-- Pipeline queue view showing what's been sent to the content pipeline.
-- Keyboard shortcuts for power use (j/k through the question bank, s to send).
+Read `.interface-design/system.md` first: intent, tokens, type scale, the dog year strip and classified-ad move cards (the signature), and the rejected defaults. Use the `interface-design` and `data-storytelling` skills in `.claude/skills/` for any front-end change, and add new patterns to `system.md` when a component is used twice.
 
 ## Brand and owner preferences (these override ui-craft where they conflict)
 
@@ -56,28 +53,27 @@ Existing JSON: `GET /api/opportunities?days=30&lens=…&region=all`, `GET /api/r
 
 ```bash
 npm install
-# Test config: no AI or email bindings, mock data mode
 python3 - <<'PY'
 import re
 s=open('wrangler.toml').read()
 s=re.sub(r'database_id = "[^"]+"','database_id = "local-test"',s)
 s=re.sub(r'\[ai\]\nbinding = "AI"\n','',s); s=re.sub(r'\[\[send_email\]\]\nname = "ALERTS"\n','',s)
-open('wrangler.test.toml','w').write(s+'\n[vars]\nMOCK = "1"\n')
+open('wrangler.test.toml','w').write(s.replace('[vars]\n','[vars]\nMOCK = "1"\n'))
 PY
 npx wrangler d1 migrations apply companimal-social-listening --local -c wrangler.test.toml
 npx wrangler dev -c wrangler.test.toml --test-scheduled
-# populate mock data
-curl -X POST "localhost:8787/api/run?job=collect"; curl -X POST "localhost:8787/api/run?job=hourly"; curl -X POST "localhost:8787/api/run?job=hourly"; curl -X POST "localhost:8787/api/run?job=morning"
+# populate mock data and build moves
+for j in tick tick morning; do curl -X POST "localhost:8787/api/run?job=$j&wait=1"; done
 ```
 
-No password locally (DASHBOARD_PASSWORD unset). `npx tsc -p .` must pass.
+No password locally (DASHBOARD_PASSWORD unset). Mock mode produces every move type. `npx tsc -p .` must pass.
 
 ## Definition of done
 
-1. 4-line design spec written first (ui-craft Phase 1), then build.
-2. Every view works with lens and region filters, empty states, first-week states (no baseline yet), and real volumes (hundreds of rows: paginate or virtualise).
+1. Read `.interface-design/system.md`; for a new direction write the 4-line design spec first (ui-craft Phase 1), then build.
+2. Every view works with empty states, first-week states (no baseline yet), real volumes (hundreds of rows: paginate or virtualise), and the lens and region filters where they apply.
 3. Keyboard focus visible on every control; hover, focus-visible and active states everywhere; tabular numbers on all metrics and tables.
-4. Screenshots of every view at 1440px and 390px checked by you before pushing; fix what looks off.
+4. Screenshots of every view at 1440px and 390px checked by you before pushing, tapping through on mobile (tabs, More, Plan, Dismiss with a reason, Draft the brief); fix what looks off.
 5. `npx tsc -p .` passes; push to `main`; confirm the Cloudflare build goes green.
 
 ---

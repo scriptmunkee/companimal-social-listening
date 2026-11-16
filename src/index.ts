@@ -1,18 +1,22 @@
 import * as TAX from "../config/taxonomy";
 import { PROJECT } from "../config/taxonomy";
-import { Env, runJob, recordQueryVersion, nowIso, saveItems, withLock } from "./lib";
+import { Env, runJob, recordQueryVersion, nowIso, saveItems, withLock, prepareEnv } from "./lib";
 import { postSerpTasks, collectSerpTasks, collectContentAnalysis } from "./collectors/dataforseo";
 import { postRedditTasks, backfillRedditItems } from "./collectors/reddit";
 import { hasSerpent, collectRedditFeeds, collectRedditDaily, collectRedditComments, collectRedditNow, pruneReddit } from "./collectors/reddit-api";
 import { analyseRedditThreads, buildRedditThemes } from "./reddit-insights";
 import { redditThreadsApi, redditThemesApi } from "./dashboard/reddit";
 import { collectYoutube } from "./collectors/youtube";
-import { enrichItems, refreshSitemap } from "./enrich";
+import { enrichItems } from "./enrich";
+import { refreshSitePages } from "./site";
+import { buildInsights, setStatus, draftBrief } from "./insights";
 import { rollup, buildBrief, opportunities, risingTopics } from "./analysis";
 import { renderPage, notFoundPage } from "./dashboard/views";
 import { questionDetail, topicDetail, seasonality, mythGroups } from "./dashboard/data";
 import { ensureSchema } from "./migrations";
-import { healthJob, checkHealth } from "./health";
+import { healthJob, checkHealth, weeklyDigest } from "./health";
+
+const dashboardUrl = (env: Env, fallback = "") => (env.DASHBOARD_URL || fallback).replace(/\/$/, "");
 
 /** 02:00 daily: post SERP tasks (PAA on Mondays), YouTube, Content Analysis. */
 async function dailyCollect(env: Env) {
@@ -62,6 +66,16 @@ async function tick(env: Env) {
       await runJob(env, "reddit_themes", () => buildRedditThemes(env));
     }
   }
+  // Themes and moves as soon as a re-read backlog clears (one-off after the insight layer went in)
+  if (await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job='insights_when_ready'`).first()) {
+    const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM reddit_threads WHERE insight_done=0 AND last_seen >= ?1`).bind(new Date(Date.now() - 30 * 86400000).toISOString()).first<any>();
+    const pullWaiting = await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job IN ('reddit_api_now','site_pages')`).first();
+    if ((left?.n || 0) <= 20 && !pullWaiting && Date.now() - start < 6 * 60000) {
+      await env.DB.prepare(`DELETE FROM pending_jobs WHERE job='insights_when_ready'`).run();
+      await runJob(env, "reddit_themes", () => buildRedditThemes(env));
+      await runJob(env, "insights", () => buildInsights(env));
+    }
+  }
   // A queued brief runs as soon as the analysis backlog is cleared
   const waiting = await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job='morning_when_ready'`).first();
   if (waiting) {
@@ -77,7 +91,8 @@ async function tick(env: Env) {
 /** One-off jobs queued by a migration (e.g. a catch-up after a fix). Each is removed before it runs. */
 async function runPending(env: Env) {
   const jobs: Record<string, () => Promise<unknown>> = {
-    sitemap: () => runJob(env, "sitemap", () => refreshSitemap(env)),
+    sitemap: () => runJob(env, "site", () => refreshSitePages(env)),
+    site_pages: () => runJob(env, "site", () => refreshSitePages(env)),
     collect: () => dailyCollect(env),
     paa: () => runJob(env, "serp_post", () => postSerpTasks(env, true, false)),
     subreddits: () => runJob(env, "reddit_post", () => postRedditTasks(env, "daily")),
@@ -99,21 +114,23 @@ async function runPending(env: Env) {
   }
 }
 
-/** 06:30 daily: rollups and the morning brief. Sitemap refresh on Mondays. */
+/** 06:30 daily: rollups, themes, moves and health. Site pages and the weekly email on Mondays. */
 async function morning(env: Env) {
-  if (new Date().getUTCDay() === 1) await runJob(env, "sitemap", () => refreshSitemap(env));
+  const d = new Date();
+  if (d.getUTCDay() === 1) await runJob(env, "site", () => refreshSitePages(env));
   await runJob(env, "rollup", () => rollup(env, 3));
-  await runJob(env, "brief", () => buildBrief(env));
   await runJob(env, "reddit_themes", () => buildRedditThemes(env));
+  await runJob(env, "insights", () => buildInsights(env));
   await runJob(env, "health", () => healthJob(env));
-  if (new Date().getUTCDate() === 1) await runJob(env, "reddit_prune", () => pruneReddit(env));
+  if (d.getUTCDay() === 1) await runJob(env, "digest", () => weeklyDigest(env, dashboardUrl(env)));
+  if (d.getUTCDate() === 1) await runJob(env, "reddit_prune", () => pruneReddit(env));
 }
 
 function authorised(req: Request, env: Env): boolean {
   if (!env.DASHBOARD_PASSWORD) return true;
   const h = req.headers.get("Authorization") || "";
   if (!h.startsWith("Basic ")) return false;
-  const [, pass] = atob(h.slice(6)).split(":");
+  const pass = atob(h.slice(6)).split(":").slice(1).join(":");
   return pass === env.DASHBOARD_PASSWORD;
 }
 
@@ -121,7 +138,8 @@ const html = (s: string) => new Response(s, { headers: { "content-type": "text/h
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o, null, 2), { status, headers: { "content-type": "application/json" } });
 
 export default {
-  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+  async scheduled(event: ScheduledController, rawEnv: Env, ctx: ExecutionContext) {
+    const env = prepareEnv(rawEnv);
     await ensureSchema(env);
     switch (event.cron) {
       case "0 2 * * *": ctx.waitUntil(dailyCollect(env)); break;
@@ -130,18 +148,36 @@ export default {
     }
   },
 
-  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(req: Request, rawEnv: Env, ctx: ExecutionContext): Promise<Response> {
+    const env = prepareEnv(rawEnv);
     if (!authorised(req, env)) return new Response("Login required", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Companimal listening"' } });
     const url = new URL(req.url);
     const lens = url.searchParams.get("lens") || undefined;
     const region = url.searchParams.get("region") === "all" ? "all" : "uk";
     try {
       await ensureSchema(env);
+      // Moves: status and briefs
+      const mv = url.pathname.match(/^\/api\/insights\/([\w-]+)\/(status|brief)$/);
+      if (req.method === "POST" && mv) {
+        if (mv[2] === "status") {
+          const b: any = await req.json().catch(() => ({}));
+          await setStatus(env, mv[1], String(b.status || ""), b.reason ? String(b.reason) : null);
+          return json({ ok: true });
+        }
+        return json({ ok: true, brief: await draftBrief(env, mv[1]) });
+      }
+      if (url.pathname === "/api/insights") return json((await env.DB.prepare(`SELECT id, type, status, priority, headline, so_what, action, target_url, target_exists, topic, breed, channels, metrics_json, last_seen_date FROM insights WHERE project=?1 ORDER BY priority DESC LIMIT 200`).bind(PROJECT.id).all()).results);
       if (req.method === "POST" && url.pathname === "/api/run") {
         const job = url.searchParams.get("job");
         const map: Record<string, () => Promise<unknown>> = {
           collect: () => dailyCollect(env), hourly: () => hourly(env), morning: () => morning(env),
-          sitemap: () => runJob(env, "sitemap", () => refreshSitemap(env)),
+          sitemap: () => runJob(env, "site", () => refreshSitePages(env)),
+          site: () => runJob(env, "site", () => refreshSitePages(env)),
+          insights: () => runJob(env, "insights", () => buildInsights(env)),
+          themes: () => runJob(env, "reddit_themes", () => buildRedditThemes(env)),
+          digest: () => runJob(env, "digest", () => weeklyDigest(env, dashboardUrl(env, url.origin))),
+          brief: () => runJob(env, "brief", () => buildBrief(env)),
+          tick: () => runPending(env).then(() => hourly(env)),
           paa: () => runJob(env, "serp_post", () => postSerpTasks(env, true)),
           rollup_all: () => runJob(env, "rollup", () => rollup(env, 400)),
           health: () => runJob(env, "health", () => healthJob(env)),
@@ -152,8 +188,9 @@ export default {
           reddit_themes: () => runJob(env, "reddit_themes", () => buildRedditThemes(env)),
         };
         if (!job || !map[job]) return json({ error: "unknown job", jobs: Object.keys(map) }, 400);
-        await map[job]();
-        return json({ ok: true, job });
+        // Long jobs run in the background so the request returns straight away
+        if (["collect", "morning", "reddit", "insights", "themes", "tick"].includes(job) && url.searchParams.get("wait") !== "1") { ctx.waitUntil(map[job]()); return json({ ok: true, job, started: true }); }
+        return json({ ok: true, job, result: await map[job]() });
       }
       if (req.method === "POST" && url.pathname === "/api/pipeline") {
         const b: any = await req.json();

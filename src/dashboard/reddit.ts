@@ -16,6 +16,7 @@ export interface ThreadRow {
   kind: string | null; theme: string | null; pain_point: string | null; need: string | null; emotion: string | null;
   content_angle: string | null; lens: string | null; topic: string | null; region: string | null; score: number; growth: number;
   upvotes: number | null; replies: string | null; flair: string | null; via: string | null;
+  breed: string | null; intent: string | null; urgency: string | null; uk_region: string | null; question: string | null;
 }
 
 export async function loadThreads(env: Env, opts: { days: number; lens?: string; region: RegionFilter; sub?: string; kind?: string; topic?: string }): Promise<ThreadRow[]> {
@@ -27,7 +28,7 @@ export async function loadThreads(env: Env, opts: { days: number; lens?: string;
   if (opts.sub) add(`lower(t.subreddit) = lower(?)`, opts.sub);
   if (opts.kind) add(`i.kind = ?`, opts.kind);
   if (opts.topic) add(`i.topic = ?`, opts.topic);
-  const rows = (await env.DB.prepare(`SELECT t.*, i.kind, i.theme, i.pain_point, i.need, i.emotion, i.content_angle, i.lens, i.topic, i.region, i.replies
+  const rows = (await env.DB.prepare(`SELECT t.*, i.kind, i.theme, i.pain_point, i.need, i.emotion, i.content_angle, i.lens, i.topic, i.region, i.replies, i.breed, i.intent, i.urgency, i.uk_region, i.question
     FROM reddit_threads t LEFT JOIN reddit_insights i ON i.post_id = t.post_id WHERE ${where.join(" AND ")} LIMIT 3000`).bind(...binds).all<any>()).results || [];
   // `score` in the table is Reddit's upvotes; on a row it's our "doing well" score, upvotes keep their own name
   return rows.map((r: any) => ({ ...r, upvotes: r.score ?? null, score: threadScore(r), growth: Math.max(0, (r.posts_count || 0) - (r.posts_count_prev ?? r.posts_count ?? 0)) }));
@@ -43,6 +44,7 @@ function age(iso: string | null) {
 }
 
 export const KINDS = KIND_LABELS;
+const INTENT_LABELS: Record<string, string> = { buy: "Buying", sell: "Selling a litter", stud: "Stud", rehome: "Rehoming", adopt: "Adopting" };
 
 /** When the thread was posted. Search finds of unknown age sort as old, not as new. */
 const postedAt = (t: ThreadRow) => Date.parse(t.created_at || (t.via === "search" ? "1970-01-01" : t.first_seen));
@@ -121,9 +123,9 @@ ${segmented("Period", [7, 30, 90].map((d) => ({ href: link({ days: d === 7 ? und
   const maxScore = Math.max(1, ...threads.map((t) => t.score));
   const rows = slice.map((t, i) => `<tr data-row tabindex="0">
 <td class="rank">${String((page - 1) * per + i + 1).padStart(2, "0")}</td>
-<td class="qcell"><a class="qlink" data-ext href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title || "Untitled thread")}</a>${t.snippet ? `<p class="snip">${esc(t.snippet.slice(0, 180))}${t.snippet.length > 180 ? "…" : ""}</p>` : ""}<div class="qmeta"><a class="tag" href="${link({ sub: t.subreddit, page: undefined })}">r/${esc(t.subreddit)}</a>${t.created_at || t.via !== "search" ? `<span>${age(t.created_at || t.first_seen)} old</span>` : ""}${t.upvotes !== null && t.upvotes !== undefined ? `<span>${fmt(t.upvotes)} upvotes</span>` : ""}${t.flair ? `<span>${esc(t.flair.replace(/^\[|\]$/g, ""))}</span>` : ""}<span>Seen ${fmt(t.seen_count)} ${t.seen_count === 1 ? "time" : "times"}</span><span class="m-only">${t.posts_count !== null && t.posts_count !== undefined ? `${fmt(t.posts_count)} comments${t.growth ? `, +${fmt(t.growth)}` : ""} · ` : ""}score ${t.score.toFixed(1)}</span></div></td>
+<td class="qcell"><a class="qlink" data-ext href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title || "Untitled thread")}</a>${t.snippet ? `<p class="snip">${esc(t.snippet.slice(0, 180))}${t.snippet.length > 180 ? "…" : ""}</p>` : ""}<div class="qmeta"><a class="tag" href="${link({ sub: t.subreddit, page: undefined })}">r/${esc(t.subreddit)}</a>${t.created_at || t.via !== "search" ? `<span>${age(t.created_at || t.first_seen)} old</span>` : ""}${t.upvotes !== null && t.upvotes !== undefined ? `<span>${fmt(t.upvotes)} upvotes</span>` : ""}${t.flair ? `<span>${esc(t.flair.replace(/^\[|\]$/g, ""))}</span>` : ""}${t.breed ? `<span>${esc(t.breed)}</span>` : ""}${t.uk_region ? `<span>${esc(t.uk_region)}</span>` : ""}${t.urgency === "now" ? `<span class="urgent" title="Stuck right now">urgent</span>` : ""}<span>Seen ${fmt(t.seen_count)} ${t.seen_count === 1 ? "time" : "times"}</span><span class="m-only">${t.posts_count !== null && t.posts_count !== undefined ? `${fmt(t.posts_count)} comments${t.growth ? `, +${fmt(t.growth)}` : ""} · ` : ""}score ${t.score.toFixed(1)}</span></div></td>
 <td class="num d-only">${t.posts_count !== null && t.posts_count !== undefined ? fmt(t.posts_count) : `<span class="muted">n/a</span>`}${t.growth ? `<div class="up" style="font-size:12.5px">+${fmt(t.growth)}</div>` : ""}</td>
-<td class="about">${t.kind ? `<span class="tag">${esc(KIND_LABELS[t.kind] || t.kind)}</span>` : ""}${t.theme ? `<div class="theme">${esc(t.theme)}</div>` : `<div class="muted">Being analysed</div>`}${t.pain_point ? `<div class="muted small">${esc(t.pain_point)}</div>` : ""}${t.emotion && t.emotion !== "neutral" ? `<div class="muted small">Feeling ${esc(t.emotion)}${t.need ? `; wants ${esc(t.need)}` : ""}</div>` : ""}${t.replies ? `<div class="muted small"><b style="font-weight:600">Replies:</b> ${esc(t.replies)}</div>` : ""}</td>
+<td class="about">${t.kind ? `<span class="tag">${esc(KIND_LABELS[t.kind] || t.kind)}</span>` : ""}${t.intent && INTENT_LABELS[t.intent] ? ` <span class="tag">${esc(INTENT_LABELS[t.intent])}</span>` : ""}${t.theme ? `<div class="theme">${esc(t.theme)}</div>` : `<div class="muted">Being analysed</div>`}${t.pain_point ? `<div class="muted small">${esc(t.pain_point)}</div>` : ""}${t.emotion && t.emotion !== "neutral" ? `<div class="muted small">Feeling ${esc(t.emotion)}${t.need ? `; wants ${esc(t.need)}` : ""}</div>` : ""}${t.replies ? `<div class="muted small"><b style="font-weight:600">Replies:</b> ${esc(t.replies)}</div>` : ""}</td>
 <td class="angle">${t.content_angle ? `<div><b class="m-only" style="font-weight:600">Angle: </b>${esc(t.content_angle)}</div>` : ""}</td>
 <td class="num score d-only">${t.score.toFixed(1)}${meter(t.score / maxScore)}</td>
 <td class="act">${t.content_angle ? sendButton(t.topic || "other", t.content_angle, queued.has(queueKey(t.topic || "other", t.content_angle)), true) : ""}</td></tr>`).join("");
@@ -144,7 +146,7 @@ ${segmented("Period", [7, 30, 90].map((d) => ({ href: link({ days: d === 7 ? und
   : `${eyebrow("From Google's index of Reddit")}<h1>Reddit</h1><p class="lede">What dog people on Reddit are talking about. Comment counts come from Google's Discussions and forums results; the comments themselves aren't available, so themes are read from titles and snippets.</p>`}</div></div>
 ${pending?.n ? notice(`<b>${fmt(pending.n)} ${pending.n === 1 ? "thread is" : "threads are"} still being analysed.</b> Themes, pain points and angles fill in as they're read, every 10 minutes.`) : ""}
 <div class="kpis" style="margin-top:0"><div><div class="v">${fmt(totals?.n)}</div><div class="l">Threads tracked</div><div class="s">Across ${fmt(totals?.subs)} subreddits</div></div><div><div class="v">${fmt(totals?.new24)}</div><div class="l">New, 24 hours</div></div><div><div class="v">${fmt(totals?.withc)}</div><div class="l">With comment counts</div><div class="s">${pct(totals?.withc || 0, totals?.n || 0)}% of threads</div></div><div><div class="v">${fmt(all.length)}</div><div class="l">In view</div><div class="s">Last ${days} days${sub ? `, r/${esc(sub)}` : ""}</div></div></div>
-${section("What people are talking about", themeDate?.d ? `Themes for ${esc(dateShort(themeDate.d))}` : "")}${themesHtml}
+${section("What people are talking about", `${themeDate?.d ? `Themes for ${esc(dateShort(themeDate.d))} · ` : ""}<a href="${href(ctx, "/themes")}">All themes</a>`)}${themesHtml}
 ${section("Threads", `${fmt(threads.length)} in view`)}${toolbar}${table}
 <p class="hint d-only"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>o</kbd> open thread</span><span><kbd>s</kbd> send the angle to the pipeline</span></p>
 ${lower}

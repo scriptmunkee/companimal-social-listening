@@ -131,6 +131,41 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
       `INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('reddit_api_now', datetime('now')), ('reddit_themes_when_ready', datetime('now'))`,
     ],
   },
+  {
+    // The insight layer: site page inventory, moves with sticky status, and a richer reading per thread.
+    // Adds only: nothing existing is dropped or rewritten.
+    name: "0016_insight_layer",
+    sql: [
+      // Every page that matters on companimal.co.uk: advice articles, the Dog Data Library, breed pages, sale and stud hubs
+      `CREATE TABLE IF NOT EXISTS site_pages (url TEXT PRIMARY KEY, project TEXT NOT NULL, path TEXT NOT NULL, kind TEXT NOT NULL,
+        title TEXT, h1 TEXT, description TEXT, breed TEXT, source TEXT, updated_at TEXT)`,
+      `CREATE INDEX IF NOT EXISTS idx_sp_path ON site_pages(path)`,
+      `CREATE INDEX IF NOT EXISTS idx_sp_kind ON site_pages(kind)`,
+      // Moves: Finding, So what, Now what. `key` keeps a move's status across daily rebuilds.
+      `CREATE TABLE IF NOT EXISTS insights (id TEXT PRIMARY KEY, project TEXT NOT NULL, key TEXT UNIQUE NOT NULL, type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'new', priority REAL DEFAULT 0, headline TEXT, so_what TEXT, action TEXT, action_label TEXT,
+        target_url TEXT, target_exists INTEGER DEFAULT 0, topic TEXT, breed TEXT, lens TEXT, channels TEXT,
+        evidence_json TEXT, evidence_ids_json TEXT, metrics_json TEXT, brief_json TEXT, evidence_at_status INTEGER DEFAULT 0,
+        created_at TEXT, updated_at TEXT, last_seen_date TEXT, status_at TEXT, dismissed_reason TEXT, model TEXT)`,
+      `CREATE INDEX IF NOT EXISTS idx_ins_status ON insights(status, priority)`,
+      `CREATE TABLE IF NOT EXISTS insight_events (id TEXT PRIMARY KEY, insight_id TEXT NOT NULL, at TEXT NOT NULL, status TEXT, reason TEXT)`,
+      // Richer reading per Reddit thread
+      `ALTER TABLE reddit_insights ADD COLUMN breed TEXT`,
+      `ALTER TABLE reddit_insights ADD COLUMN breed_slug TEXT`,
+      `ALTER TABLE reddit_insights ADD COLUMN intent TEXT`,
+      `ALTER TABLE reddit_insights ADD COLUMN urgency TEXT`,
+      `ALTER TABLE reddit_insights ADD COLUMN uk_region TEXT`,
+      `ALTER TABLE reddit_insights ADD COLUMN question TEXT`,
+      `ALTER TABLE reddit_insights ADD COLUMN disagreement INTEGER DEFAULT 0`,
+      `ALTER TABLE reddit_insights ADD COLUMN asks_for_guide INTEGER DEFAULT 0`,
+      `CREATE INDEX IF NOT EXISTS idx_ri_intent ON reddit_insights(intent)`,
+      `CREATE INDEX IF NOT EXISTS idx_ri_breed ON reddit_insights(breed_slug)`,
+      // Read the last 30 days again with the richer prompt (old readings stay until each is replaced)
+      `UPDATE reddit_threads SET insight_done = 0, insight_attempts = 0 WHERE last_seen >= date('now','-30 day') AND post_id IN (SELECT post_id FROM reddit_insights)`,
+      // Read the site now, then build themes and moves once the re-read is done
+      `INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('site_pages', datetime('now')), ('insights_when_ready', datetime('now'))`,
+    ],
+  },
 ];
 
 let checked = false;

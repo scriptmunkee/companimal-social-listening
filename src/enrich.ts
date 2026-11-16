@@ -79,7 +79,14 @@ const FILLER = /\b101\b|tips (and|&) tricks|what you need to know|everything you
 /** Drop filler titles; sentence-case the rest. */
 export function cleanIdea(s: unknown): string | null {
   if (typeof s !== "string" || !s.trim() || FILLER.test(s)) return null;
-  return sentenceCase(s.trim().replace(/\s+/g, " "));
+  return sentenceCase(s.trim().replace(/\s*(--|—)\s*/g, ": ").replace(/\s+/g, " "));
+}
+
+/** House style for AI text shown anywhere: UK English, never double hyphens or em dashes. */
+export function tidy(s: unknown, max = 400): string | null {
+  if (typeof s !== "string") return null;
+  const t = s.replace(/\s*--\s*/g, ", ").replace(/\s*—\s*/g, ", ").replace(/\s+/g, " ").trim();
+  return t ? t.slice(0, max) : null;
 }
 
 /** Rules-based region guess from text, source and community. */
@@ -234,25 +241,3 @@ export async function enrichItems(env: Env, limit = 200, deadline = Date.now() +
   return { added: items.length - skipped, seen: items.length, note: `ai=${aiUsed}${skipped ? `, ${skipped} left for next run` : ""}` };
 }
 
-/** Refresh site URLs from the sitemap for content gap matching. */
-export async function refreshSitemap(env: Env) {
-  const locs: string[] = [];
-  const fetchLocs = async (url: string) => {
-    const res = await fetch(url, { headers: { "User-Agent": "CompanimalSocialListening/1.0" } });
-    if (!res.ok) throw new Error(`sitemap ${url} HTTP ${res.status}`);
-    const xml = await res.text();
-    return [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]);
-  };
-  const top = await fetchLocs(PROJECT.sitemap);
-  const children = top.filter((u) => u.endsWith(".xml"));
-  if (children.length) for (const c of children.slice(0, 25)) locs.push(...(await fetchLocs(c)));
-  else locs.push(...top);
-  // Content pages only: skip programmatic location x breed listings
-  const content = locs.filter((u) => /puppy-advice|statistics|sell-my-pupp|guide|advice|blog/.test(u));
-  const stmts = content.map((u) => {
-    const slug = new URL(u).pathname.replace(/\//g, " ");
-    return env.DB.prepare(`INSERT OR REPLACE INTO site_urls (project, url, tokens, updated_at) VALUES (?1, ?2, ?3, ?4)`).bind(PROJECT.id, u, tokens(slug).join(" "), nowIso());
-  });
-  for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));
-  return { added: content.length, seen: locs.length, note: `${content.length} content URLs of ${locs.length}` };
-}

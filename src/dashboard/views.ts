@@ -1,5 +1,6 @@
 import { PROJECT, TOPICS, LENSES } from "../../config/taxonomy";
 import { viewReddit } from "./reddit";
+import { thisWeek, moveDetail, demandView, themesView, coverageView } from "./moves";
 import { Env } from "../lib";
 import { risingTopics, opportunities, normQ, RegionFilter, Opportunity, RisingTopic } from "../analysis";
 import {
@@ -50,84 +51,6 @@ function baselineNotice(h: { first: string | null; days: number }) {
 }
 
 // ---------- Today ----------
-
-async function today(env: Env, ctx: Ctx, mh: Awaited<ReturnType<typeof masthead>>) {
-  const brief = await env.DB.prepare(`SELECT body_json, date, model FROM briefs WHERE project=?1 ORDER BY date DESC LIMIT 1`).bind(PROJECT.id).first<any>();
-  const b = brief ? JSON.parse(brief.body_json) : null;
-  const [k, rising, opps14, queued, pipe, myths] = await Promise.all([
-    kpis(env, ctx.region, ctx.lens), risingTopics(env, ctx.lens, ctx.region), opportunities(env, 14, ctx.lens, 500, ctx.region),
-    queuedSet(env), pipeline(env, 5, 0), mythGroups(env, ctx.lens, ctx.region, undefined, 30),
-  ]);
-  const unanswered = opps14.filter((o) => !o.covered);
-  const findOpp = (topic: string, q: string) => opps14.find((o) => o.topic === topic && normQ(o.question) === normQ(q));
-
-  // Brief ideas, narrowed to the chosen audience's topics
-  let ideas: { title: string; topic: string; why: string; questions: string[] }[] = (b?.ideas || []).filter((i: any) => i && i.title);
-  let filtered = false;
-  let fromBrief = ideas.length > 0;
-  if (ctx.lens && ideas.length) {
-    const kept = ideas.filter((i) => TOPICS.find((t) => t.id === i.topic)?.lens.includes(ctx.lens as any));
-    filtered = kept.length !== ideas.length; ideas = kept;
-  }
-  if (!ideas.length) { fromBrief = false; } 
-  if (!ideas.length) ideas = unanswered.slice(0, 5).map((o) => ({ title: o.question, topic: o.topic, why: `${fmt(o.count)} mentions and ${fmt(o.engagement)} engagement in 14 days; nothing on the site answers it yet.`, questions: [o.question] }));
-
-  const issues = mh.issues.length ? `<div class="alert" role="status"><b>${mh.issues.length} collection ${mh.issues.length === 1 ? "issue" : "issues"} in the last day.</b> Data may be thin until they clear. <a href="${href(ctx, "/sources")}#runs">Run log</a><ul>${mh.issues.map((i) => `<li><b>${esc(i.job)}</b>: ${esc(i.problem)}</li>`).join("")}</ul></div>` : "";
-  const headMeta = brief ? `Brief for ${esc(dateShort(brief.date))} · ${brief.model === "rules" ? "rules-based" : "AI-written"}${filtered ? ` · ${esc(lensName(ctx.lens))} topics only` : ""}` : "No brief yet";
-
-  let hero = "";
-  const lead = ideas[0];
-  if (lead) {
-    const m = findOpp(lead.topic, lead.questions?.[0] || lead.title) || findOpp(lead.topic, lead.title);
-    const sendQ = lead.title;
-    const leadPosts = m ? (await questionDetail(env, m.topic, m.question, 14, ctx.lens, ctx.region)).posts : [];
-    const where = new Map<string, number>();
-    for (const p of leadPosts) { const c = p.community || SOURCE_LABELS[p.source] || p.source; where.set(c, (where.get(c) || 0) + 1); }
-    const askedIn = [...where.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-    const said = leadPosts.filter((p) => (p.text || p.title || "").length > 20 && normQ(p.text || p.title || "") !== normQ(m!.question)).slice(0, 2);
-    const qs = (lead.questions || []).slice(0, 4);
-    hero = `<article class="panel hero c-7" aria-labelledby="lead">
-<div>${eyebrow(fromBrief ? "Lead idea" : "Top unanswered question")}${topicTag(ctx, lead.topic)}</div>
-<h2 id="lead">${m ? `<a data-drawer href="${href(ctx, "/q", { topic: m.topic, q: m.question, days: 14 })}">${esc(lead.title)}</a>` : esc(lead.title)}</h2>
-<p class="why">${esc(lead.why)}</p>
-${qs.length && !(qs.length === 1 && normQ(qs[0]) === normQ(lead.title)) ? `<div><p class="eyebrow">Answer these as H2s</p><ol class="h2list">${qs.map((q, i) => `<li><span>H2·${i + 1}</span>${esc(q)}</li>`).join("")}</ol></div>` : ""}
-${said.length ? `<div><p class="eyebrow">In their words</p><ul class="quotes">${said.map((p) => `<li>${esc((p.text || p.title || "").slice(0, 200))}${(p.text || "").length > 200 ? "…" : ""}<span>${esc(p.community || SOURCE_LABELS[p.source] || p.source)} · ${esc(SOURCE_LABELS[p.source] || p.source)}${p.engagement ? ` · ${fmt(p.engagement)} engagement` : ""}</span></li>`).join("")}</ul></div>` : ""}
-${askedIn.length ? `<div><p class="eyebrow">Asked in</p><div class="qmeta" style="margin:0">${askedIn.map(([c, n]) => `<span class="tag">${esc(c)} <span class="muted">· ${n}</span></span>`).join("")}</div></div>` : ""}
-<div class="hero-foot">${m ? `<dl class="stats"><div><dt>Mentions</dt><dd>${fmt(m.count)}</dd></div><div><dt>Engagement</dt><dd>${fmt(m.engagement)}</dd></div><div><dt>Sources</dt><dd>${m.sources.split(", ").length}</dd></div><div><dt>Score</dt><dd>${m.score.toFixed(1)}</dd></div></dl>` : `<span></span>`}
-<div class="actions" style="display:flex;gap:10px;align-items:center">${sendButton(lead.topic, sendQ, queued.has(queueKey(lead.topic, sendQ)))}</div></div>
-</article>`;
-  }
-  const rest = ideas.slice(1, 5);
-  const queue = `<section class="panel queue c-5" aria-label="More ideas">${eyebrow(fromBrief ? "Also in today's brief" : "Next in line")}${rest.length ? `<ol>${rest.map((i, n) => {
-    const m = findOpp(i.topic, i.questions?.[0] || i.title) || findOpp(i.topic, i.title);
-    return `<li><span class="n">${two(n + 2)}</span><div>${m ? `<a class="t" data-drawer href="${href(ctx, "/q", { topic: m.topic, q: m.question, days: 14 })}">${esc(i.title)}</a>` : `<a class="t" href="${topicHref(ctx, i.topic)}">${esc(i.title)}</a>`}<p>${esc(topicLabel(i.topic))} · ${esc(i.why)}</p></div></li>`;
-  }).join("")}</ol>` : `<p class="muted" style="margin:12px 0 0">Nothing else in the brief for this audience.</p>`}</section>`;
-
-  const week = k?.week || 0, prev = k?.prevweek || 0;
-  const kpiStrip = `<div class="kpis">
-<div><div class="v">${fmt(k?.total)}</div><div class="l">Posts archived</div><div class="s">${k?.irrelevant ? `${fmt(k.irrelevant)} off-topic hidden` : "Every post kept"}</div></div>
-<div><div class="v">${fmt(week)}</div><div class="l">Collected, 7 days</div><div class="s">${prev ? `${week >= prev ? "Up" : "Down"} ${Math.abs(pct(week - prev, prev))}% on the week before` : "First week of collection"}</div></div>
-<div><div class="v">${fmt(k?.questions)}</div><div class="l">Questions extracted</div><div class="s">${ctx.region === "uk" ? "UK and unsure" : "All regions"}${ctx.lens ? `, ${esc(lensName(ctx.lens)?.toLowerCase())}` : ""}</div></div>
-<div><div class="v">${pct(k?.uk || 0, k?.tagged || 0)}%</div><div class="l">Clearly from the UK</div><div class="s">Of ${fmt(k?.tagged)} tagged posts</div></div>
-</div>`;
-
-  const top = rising.slice(0, 6);
-  const strip = top.length ? `<div class="strip">${top.map((r) => `<a href="${topicHref(ctx, r.topic)}"><span class="t">${esc(r.label)}</span><span class="m"><span><b>${fmt(r.last7)}</b> this week</span>${changeText(r)}</span>${spark(r.spark, 160, 34, `${r.label}: daily mentions over 35 days`)}</a>`).join("")}</div>` : empty("No topic history yet", "Rising topics appear after the first daily rollup.");
-
-  const mythList = myths.slice(0, 3);
-  const bottom = `<div class="bento" style="margin-top:8px">
-<section class="c-6">${section("Claims to fact-check", `<a href="${href(ctx, "/myths")}">All myths</a>`)}${mythList.length ? `<div class="myth-teaser">${mythList.map((m, i) => `<div class="myth"><span class="rank">${two(i + 1)}</span><div><p class="claim">${esc(m.claim)}</p><div class="qmeta">${topicTag(ctx, m.topic)}<span>Seen ${fmt(m.count)} ${m.count === 1 ? "time" : "times"} in 30 days</span></div></div></div>`).join("")}</div>` : empty("No myths in the last 30 days")}</section>
-<section class="c-6">${section("Recently sent to the pipeline", `<a href="${href(ctx, "/pipeline")}">Pipeline</a>`)}${pipe.rows.length ? `<ul class="list">${pipe.rows.map((p: any) => `<li class="post"><div class="post-h"><span class="mono">${esc(timeShort(p.created_at))}</span>${topicTag(ctx, p.topic)}</div><a class="qlink" data-drawer href="${href(ctx, "/q", { topic: p.topic, q: p.question || "" })}">${esc(p.question || topicLabel(p.topic))}</a></li>`).join("")}</ul>` : empty("Nothing sent yet", "Press <kbd>s</kbd> on a question, or use Send to pipeline, to queue it for the Content Ledger.")}</section>
-</div>`;
-
-  const body = `${issues}<div class="page-head"><div>${eyebrow(headMeta)}<h1>What to write next</h1></div></div>
-<div class="bento">${hero || `<div class="c-12">${empty("No questions yet", "They appear after the first collection and analysis runs. The first brief is written after a full day of collection.")}</div>`}${hero ? queue : ""}</div>
-${kpiStrip}
-${section("Rising this week", `<a href="${href(ctx, "/rising")}">All topics</a>`)}${top.length && !top[0].baselineReady ? `<p class="hint" style="margin:-4px 0 12px">Ranked by volume until there are ${BASELINE_DAYS} days of history.</p>` : ""}${strip}
-${section("Top unanswered questions", `Last 14 days · <a href="${href(ctx, "/questions", { status: "gaps", days: 30 })}">Question bank</a>`)}${unanswered.length ? qtable(ctx, unanswered.slice(0, 8), { queued, days: 14 }) : empty("Every question from the last 14 days is covered", "Or nothing has been collected yet for this filter.")}
-${bottom}`;
-  return { title: "Today", body };
-}
 
 // ---------- Question bank ----------
 
@@ -346,7 +269,13 @@ export async function renderPage(env: Env, url: URL, lens: string | undefined, r
   }
   const mh = await masthead(env);
   let out: { title: string; body: string } | null = null;
-  if (p === "/") out = await today(env, ctx, mh);
+  // Insights-first views carry no audience or region filter; the data views do
+  let filters = true;
+  if (p === "/") { out = await thisWeek(env, ctx, url); filters = false; }
+  else if (p.startsWith("/move/")) { out = await moveDetail(env, ctx, decodeURIComponent(p.slice(6))); filters = false; }
+  else if (p === "/demand") { out = await demandView(env, ctx); filters = false; }
+  else if (p === "/themes") { out = await themesView(env, ctx); filters = false; }
+  else if (p === "/coverage") { out = await coverageView(env, ctx); filters = false; }
   else if (p === "/questions") out = await questions(env, ctx, url);
   else if (p === "/q") { const r = await questionDetailHtml(env, ctx, url, false); out = r && "body" in r ? r as { title: string; body: string } : null; }
   else if (p === "/rising") out = await rising(env, ctx);
@@ -358,13 +287,13 @@ export async function renderPage(env: Env, url: URL, lens: string | undefined, r
   else if (p === "/pipeline") out = await pipelineView(env, ctx, url);
   else if (p === "/sources") out = await sourcesView(env, ctx, url);
   if (!out) return null;
-  return layout(ctx, out.title, out.body, { issues: mh.issues.length, since: mh.since, posts: mh.posts, queued: mh.queued });
+  return layout(ctx, out.title, out.body, { issues: mh.issues.length, since: mh.since, posts: mh.posts, queued: mh.queued, updated: mh.updated }, { filters });
 }
 
 /** 404 page in the same shell. */
 export async function notFoundPage(env: Env, url: URL, lens: string | undefined, region: RegionFilter) {
   const ctx: Ctx = { path: url.pathname, lens, region };
   const mh = await masthead(env);
-  return layout(ctx, "Not found", `${empty("That page doesn't exist", `<a href="${href(ctx, "/")}">Back to Today</a>`)}`, { issues: mh.issues.length, since: mh.since, posts: mh.posts, queued: mh.queued });
+  return layout(ctx, "Not found", `${empty("That page doesn't exist", `<a href="${href(ctx, "/")}">Back to this week</a>`)}`, { issues: mh.issues.length, since: mh.since, posts: mh.posts, queued: mh.queued, updated: mh.updated });
 }
 
