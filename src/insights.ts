@@ -202,6 +202,7 @@ export async function buildInsights(env: Env) {
 
   const cards: Card[] = [];
   let model = "rules";
+  const answered = new Set<string>(); // refs the AI returned (moves or "covered"); rules fill the rest
   const push = (c: Omit<Card, "target" | "target_exists" | "type"> & { type: string; target: unknown; fallback: string }) => {
     const g = articleTarget(c.target, c.fallback);
     const type = c.type === "article" ? (g.exists ? "update_article" : "new_article") : c.type;
@@ -224,8 +225,9 @@ Each move has three parts, written for a busy SEO consultant:
 - coverage: "missing" (no page answers it), "thin" (a page exists but misses it) or "covered" (a page already answers it well)
 
 Moves to produce:
-1. For EACH theme: one move, ref "T" + number. Skip if coverage is "covered".
-2. For EACH question cluster: one move, ref "Q" + number. Skip if covered.
+1. For EACH theme: one move, ref "T" + number.
+2. For EACH question cluster: one move, ref "Q" + number.
+Answer EVERY ref. When a page already answers it well, still return it with coverage "covered" (and short text).
 3. For EACH demand row: one move, ref "D" + number: what the hub page (given) should answer for these people, and which questions they ask. target = the hub given.
 4. For EACH myth row: one move, ref "M" + number: an article or section that corrects it, with the facts a UK reader needs.
 Chris dismissed these recently; do NOT suggest them or close variants again:
@@ -249,9 +251,11 @@ MYTHS (number | claim or theme | posts | what people say):
 ${mythRows.map((m, i) => `M${i + 1} | ${m.label} | ${m.ev.length} | ${m.say.slice(0, 400)}`).join("\n") || "(none)"}`;
     try {
       const ok = (a: any[]) => a.filter((c) => c && typeof c.headline === "string" && typeof c.ref === "string").length >= 1;
-      const [arr, used] = await runAi(env, prompt, 8000, 0.1, [AI_STRONG_MODEL, AI_MODEL], ok, 170000);
+      // The strong model gets a second try before the fallback (it occasionally times out)
+      const [arr, used] = await runAi(env, prompt, 8000, 0.1, [AI_STRONG_MODEL, AI_STRONG_MODEL, AI_MODEL], ok, 150000);
       model = used;
       for (const c of arr) {
+        if (c && typeof c.ref === "string") answered.add(c.ref.toUpperCase());
         if (!c || typeof c.headline !== "string" || c.coverage === "covered") continue;
         const ref = String(c.ref || "").toUpperCase();
         const n = Number(ref.slice(1)) - 1;
@@ -279,9 +283,9 @@ ${mythRows.map((m, i) => `M${i + 1} | ${m.label} | ${m.ev.length} | ${m.say.slic
 
   // ---- Rules: anything the AI didn't cover (and everything when it's unavailable) --------------
   const have = (key: string) => cards.some((c) => c.key === key);
-  for (const t of usable.slice(0, 8)) {
+  for (const [ti, t] of usable.slice(0, 8).entries()) {
     const key = `article:${slug(t.theme)}`;
-    if (have(key) || model !== "rules") continue;
+    if (have(key) || answered.has(`T${ti + 1}`)) continue;
     const ideas = JSON.parse(t.ideas_json || "[]");
     const asks = t.asks ? ` ${t.asks} asked for a guide.` : "";
     push({ key, type: "article", headline: `${t.list.length} threads on "${t.theme}" with ${t.comments.toLocaleString("en-GB")} comments`,
@@ -289,18 +293,18 @@ ${mythRows.map((m, i) => `M${i + 1} | ${m.label} | ${m.ev.length} | ${m.say.slic
       action_label: "Draft the article", model: "rules", lens: null, target: t.breed ? `/breeds/${t.breed}/` : null, fallback: ideas[0] || t.theme, topic: t.topic, breed: t.breed,
       evidence: t.list.map(threadEv), extra: { theme: t.theme, summary: t.summary, ideas, guideAsks: t.asks } });
   }
-  for (const q of questions.slice(0, 6)) {
+  for (const [qi, q] of questions.slice(0, 6).entries()) {
     const key = `article:q:${slug(q.question)}`;
-    if (have(key) || model !== "rules") continue;
+    if (have(key) || answered.has(`Q${qi + 1}`)) continue;
     const channels = [...q.sources].map((s) => SOURCE_NAME[s] || s);
     push({ key, type: "article", headline: `${q.items.length} posts on ${channels.join(" and ")} ask "${q.question.slice(0, 80)}"`,
       so_what: q.matched ? `A page covers the topic but people still ask it this way.` : "Nothing on the site answers it in these words.", action: q.matched ? `Add a section answering "${q.question}"` : `Write an article answering "${q.question}"`,
       action_label: q.matched ? "Add a section" : "Draft the article", model: "rules", lens: q.lens, target: q.matched ? new URL(q.matched, PROJECT.site).pathname : null, fallback: q.question,
       topic: q.topic, breed: breedInText(q.question), evidence: q.items.map(itemEv), extra: { question: q.question } });
   }
-  for (const d of demandRows) {
+  for (const [di, d] of demandRows.entries()) {
     const key = `demand:${d.intent}:${d.breed || "any"}`;
-    if (have(key)) continue;
+    if (have(key) || (answered.has(`D${di + 1}`) && model !== "rules")) continue;
     const hub = hubFor(d.intent, d.breed, byPath);
     const qs = [...new Set(d.list.map((t: any) => t.question || t.title))].slice(0, 3);
     const who = d.breed ? `${breedName(d.breed)} ${DEMAND[d.intent].who}` : DEMAND[d.intent].who;
@@ -310,9 +314,9 @@ ${mythRows.map((m, i) => `M${i + 1} | ${m.label} | ${m.ev.length} | ${m.say.slic
       topic: d.list[0]?.topic || null, breed: d.breed, lens: d.intent === "sell" || d.intent === "stud" ? "breeder" : d.intent === "rehome" || d.intent === "adopt" ? "rescue" : "buyer",
       evidence: d.list.map(threadEv), extra: { intent: d.intent, prev: d.prev } });
   }
-  for (const m of mythRows) {
+  for (const [mi, m] of mythRows.entries()) {
     const key = `myth:${slug(m.label)}`;
-    if (have(key) || model !== "rules") continue;
+    if (have(key) || answered.has(`M${mi + 1}`)) continue;
     push({ key, type: "myth", headline: `${m.ev.length} posts repeat or argue over "${m.label.slice(0, 70)}"`, so_what: "Wrong or risky advice is being repeated; a clear, sourced answer is worth publishing.",
       action: `Write a section that settles "${m.label}" with the UK facts`, action_label: "Draft the correction", model: "rules", lens: null, target: null, fallback: `${m.label} myth`, topic: m.topic, breed: null, evidence: m.ev });
   }

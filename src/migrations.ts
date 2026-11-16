@@ -175,6 +175,10 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     // Rebuild after the fixes: index pages are never update targets; plain hyphens in AI text
     name: "0018_moves_rebuild",
     sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('insights_now', datetime('now'))`],
+  },  {
+    // Rebuild with every ref answered (rules fill what the AI leaves out)
+    name: "0019_moves_rebuild",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('insights_now', datetime('now'))`],
   },
 ];
 
