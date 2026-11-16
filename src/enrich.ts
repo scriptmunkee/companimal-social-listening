@@ -79,13 +79,13 @@ const FILLER = /\b101\b|tips (and|&) tricks|what you need to know|everything you
 /** Drop filler titles; sentence-case the rest. */
 export function cleanIdea(s: unknown): string | null {
   if (typeof s !== "string" || !s.trim() || FILLER.test(s)) return null;
-  return sentenceCase(s.trim().replace(/\s*(--|—)\s*/g, ": ").replace(/\s+/g, " "));
+  return sentenceCase(s.trim().replace(/[\u2010\u2011\u2012]/g, "-").replace(/\s*(--|—)\s*/g, ": ").replace(/\s+/g, " "));
 }
 
 /** House style for AI text shown anywhere: UK English, never double hyphens or em dashes. */
 export function tidy(s: unknown, max = 400): string | null {
   if (typeof s !== "string") return null;
-  const t = s.replace(/\s*--\s*/g, ", ").replace(/\s*—\s*/g, ", ").replace(/\s+/g, " ").trim();
+  const t = s.replace(/[\u2010\u2011\u2012]/g, "-").replace(/\u00a0|\u202f/g, " ").replace(/\s*--\s*/g, ", ").replace(/\s*—\s*/g, ", ").replace(/\s+/g, " ").trim();
   return t ? t.slice(0, max) : null;
 }
 

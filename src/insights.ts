@@ -193,7 +193,9 @@ export async function buildInsights(env: Env) {
   };
   const articleTarget = (target: unknown, fallback: string) => {
     const p = pageFor(target);
-    if (p && (p.kind === "advice" || p.kind === "statistics" || p.kind === "breed" || p.kind === "core")) return { path: p.path, exists: true };
+    // Index and listing pages (/, /puppy-advice/, /statistics/, /breeds) are never an article to update
+    const index = p && ["/", "/puppy-advice/", "/statistics/", "/breeds", "/breeders", "/sale/puppies/", "/stud/dogs/"].includes(p.path);
+    if (p && !index && (p.kind === "advice" || p.kind === "statistics" || p.kind === "breed" || p.kind === "core")) return { path: p.path, exists: true };
     const t = typeof target === "string" && /^\/(puppy-advice|statistics)\/[a-z0-9-]+$/.test(norm(target)) ? norm(target) : `/puppy-advice/${slug(fallback).slice(0, 60)}`;
     return { path: t, exists: false };
   };
@@ -232,7 +234,7 @@ Companimal never phones or video-calls breeders; never suggest copy that says it
 Return ONLY a JSON array of {"ref","headline","so_what","action","action_label","target","coverage"}.
 
 PAGES (path | title):
-${articles.map((p) => `${p.path} | ${p.title || p.h1 || ""}`).join("\n")}
+${articles.filter((p) => !["/puppy-advice/", "/statistics/"].includes(p.path)).map((p) => `${p.path} | ${p.title || p.h1 || ""}`).join("\n")}
 
 THEMES from Reddit (number | theme | threads | comments | upvotes | clearly UK | asked for a guide | breed | what people say | article ideas):
 ${usable.map((t: any, i: number) => `T${i + 1} | ${t.theme} | ${t.list.length} | ${t.comments} | ${t.upvotes} | ${t.uk} | ${t.asks} | ${t.breed ? breedName(t.breed) : ""} | ${t.summary || ""} | ${JSON.parse(t.ideas_json || "[]").join("; ")}`).join("\n") || "(none yet)"}

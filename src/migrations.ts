@@ -171,6 +171,11 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0017_moves_now",
     sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('insights_now', datetime('now'))`],
   },
+  {
+    // Rebuild after the fixes: index pages are never update targets; plain hyphens in AI text
+    name: "0018_moves_rebuild",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('insights_now', datetime('now'))`],
+  },
 ];
 
 let checked = false;
