@@ -25,7 +25,8 @@ export const isSynthesisDay = (d = new Date()) => d.getUTCDay() === SYNTHESIS_DA
 export const WAITING_NOTE = "weekly reading: waits for Sunday";
 // Queue this job to run the weekly reading now, outside Sunday:
 //   INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('read_now', datetime('now'));
-// It reads until the queue is empty (within the same weekly budget), then rebuilds themes and moves.
+// It reads until the queue is empty or for 2 hours at most (within the same weekly budget), then rebuilds
+// themes and moves.
 export const READ_NOW_JOB = "read_now";
 
 /** True on Sundays, or while a 'read_now' job is queued. */

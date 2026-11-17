@@ -51,8 +51,10 @@ async function tick(env: Env) {
   }
   const threads = await runJob(env, "reddit_insights", () => analyseRedditThreads(env, 144, start + 5 * 60000));
   const posts = await runJob(env, "enrich", () => enrichItems(env, 400, start + 8.5 * 60000));
-  // A queued 'read_now' ends once a run finds nothing left to read; themes and moves then catch up
-  if (!threads.seen && !posts.seen && (await env.DB.prepare(`DELETE FROM pending_jobs WHERE job=?1`).bind(READ_NOW_JOB).run()).meta?.changes) {
+  // A queued 'read_now' ends once a run finds nothing left to read, or after 2 hours (new threads keep
+  // trickling in, so it could otherwise read all week); themes and moves then catch up
+  const drained = !threads.seen && !posts.seen ? 1 : 0;
+  if ((await env.DB.prepare(`DELETE FROM pending_jobs WHERE job=?1 AND (?2 = 1 OR created_at < datetime('now', '-2 hours'))`).bind(READ_NOW_JOB, drained).run()).meta?.changes) {
     await runJob(env, "reddit_themes", () => buildRedditThemes(env));
     await runJob(env, "insights", () => buildInsights(env));
   }
