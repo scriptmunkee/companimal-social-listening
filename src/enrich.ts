@@ -7,6 +7,9 @@ export const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 export const AI_FALLBACK_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 // Stronger instruction-follower for low-volume synthesis (weekly themes); falls back to AI_MODEL
 export const AI_STRONG_MODEL = "@cf/openai/gpt-oss-120b";
+// The weekly reading of every post and thread: the small model (about a sixth of the 70B's price per
+// token, so the weekly budget covers far more posts), with the 70B when its answer is unusable
+export const AI_READ_MODELS = [AI_FALLBACK_MODEL, AI_MODEL];
 const REGIONS = ["uk", "non_uk", "unknown"];
 
 /**
@@ -210,7 +213,7 @@ export async function enrichItems(env: Env, limit = 200, deadline = Date.now() +
     await inWaves(batches, 4, deadline, async (batch) => {
       if (budgetHit || !(await readingBudgetLeft(env))) { budgetHit = true; return; }
       try {
-        const [rows, model] = await runAi(env, buildPrompt(batch), 3000);
+        const [rows, model] = await runAi(env, buildPrompt(batch), 3000, 0, AI_READ_MODELS);
         for (const r of rows) if (r?.id && KINDS.includes(r.kind)) { results.set(r.id, { ...r, model }); aiUsed++; }
         for (const b of batch) attempted.add(b.id);
       } catch (e) {

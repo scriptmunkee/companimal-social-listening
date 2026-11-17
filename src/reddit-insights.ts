@@ -2,7 +2,7 @@
 import { PROJECT, TOPICS, REDDIT_INSIGHTS_PER_RUN, REDDIT_COMMENTS_TOP, REDDIT_COMMENTS_MIN, INTENTS, URGENCY, UK_REGIONS } from "../config/taxonomy";
 import { breedSlugOf, breedInText, breedName } from "./site";
 import { Env, nowIso, today, daysAgo, clean, inWaves } from "./lib";
-import { runAi, regionOf, heuristic, cleanIdea, sentenceCase, AI_STRONG_MODEL, AI_MODEL, AI_FALLBACK_MODEL } from "./enrich";
+import { runAi, regionOf, heuristic, cleanIdea, sentenceCase, AI_STRONG_MODEL, AI_MODEL, AI_FALLBACK_MODEL, AI_READ_MODELS } from "./enrich";
 import { isReadingDay, readingBudgetLeft, WAITING_NOTE } from "./ai-budget";
 import { threadScore } from "./collectors/reddit";
 
@@ -113,7 +113,7 @@ export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER
     await inWaves(batches, 4, deadline, async (batch) => {
       if (budgetHit || !(await readingBudgetLeft(env))) { budgetHit = true; return; }
       try {
-        const [arr, used] = await runAi(env, insightPrompt(batch), 4000);
+        const [arr, used] = await runAi(env, insightPrompt(batch), 4000, 0, AI_READ_MODELS);
         answered++;
         for (const r of arr) if (r?.id && KINDS.includes(r.kind)) out.set(String(r.id), r);
         model = used;
