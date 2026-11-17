@@ -15,7 +15,7 @@ import { renderPage, notFoundPage } from "./dashboard/views";
 import { questionDetail, topicDetail, seasonality, mythGroups } from "./dashboard/data";
 import { ensureSchema } from "./migrations";
 import { healthJob, checkHealth, weeklyDigest } from "./health";
-import { isSynthesisDay } from "./ai-budget";
+import { isSynthesisDay, READ_NOW_JOB } from "./ai-budget";
 
 const dashboardUrl = (env: Env, fallback = "") => (env.DASHBOARD_URL || fallback).replace(/\/$/, "");
 
@@ -49,8 +49,13 @@ async function tick(env: Env) {
     }
     await runJob(env, "reddit_comments", () => collectRedditComments(env, start + 150000));
   }
-  await runJob(env, "reddit_insights", () => analyseRedditThreads(env, 144, start + 5 * 60000));
-  await runJob(env, "enrich", () => enrichItems(env, 400, start + 8.5 * 60000));
+  const threads = await runJob(env, "reddit_insights", () => analyseRedditThreads(env, 144, start + 5 * 60000));
+  const posts = await runJob(env, "enrich", () => enrichItems(env, 400, start + 8.5 * 60000));
+  // A queued 'read_now' ends once a run finds nothing left to read; themes and moves then catch up
+  if (!threads.seen && !posts.seen && (await env.DB.prepare(`DELETE FROM pending_jobs WHERE job=?1`).bind(READ_NOW_JOB).run()).meta?.changes) {
+    await runJob(env, "reddit_themes", () => buildRedditThemes(env));
+    await runJob(env, "insights", () => buildInsights(env));
+  }
   // One-off themes rebuild (queued by a migration), after the routine work
   if ((await env.DB.prepare(`DELETE FROM pending_jobs WHERE job='reddit_themes_now'`).run()).meta?.changes) {
     await runJob(env, "reddit_themes", () => buildRedditThemes(env));

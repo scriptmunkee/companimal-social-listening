@@ -23,6 +23,16 @@ const READING_SHARE = 0.85;
 export const isReadingDay = (d = new Date()) => d.getUTCDay() === READING_DAY;
 export const isSynthesisDay = (d = new Date()) => d.getUTCDay() === SYNTHESIS_DAY;
 export const WAITING_NOTE = "weekly reading: waits for Sunday";
+// Queue this job to run the weekly reading now, outside Sunday:
+//   INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('read_now', datetime('now'));
+// It reads until the queue is empty (within the same weekly budget), then rebuilds themes and moves.
+export const READ_NOW_JOB = "read_now";
+
+/** True on Sundays, or while a 'read_now' job is queued. */
+export async function readingAllowed(env: Env): Promise<boolean> {
+  if (isReadingDay()) return true;
+  return !!(await env.DB.prepare(`SELECT 1 FROM pending_jobs WHERE job=?1`).bind(READ_NOW_JOB).first());
+}
 
 /** The budget week starts on the reading day: the most recent Sunday (UTC), as YYYY-MM-DD. */
 export function weekStart(d = new Date()): string {

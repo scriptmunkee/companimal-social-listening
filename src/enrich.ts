@@ -1,6 +1,6 @@
 import { TOPICS, PROJECT, UK_SIGNALS, NON_UK_SIGNALS, UK_FORUM_DOMAINS } from "../config/taxonomy";
 import { Env, nowIso, clean, inWaves } from "./lib";
-import { isReadingDay, readingBudgetLeft, neuronsFor, recordAiUsage, WAITING_NOTE } from "./ai-budget";
+import { readingAllowed, readingBudgetLeft, neuronsFor, recordAiUsage, WAITING_NOTE } from "./ai-budget";
 
 export const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 // Used if the main model is retired or failing
@@ -194,7 +194,7 @@ export function urlMatch(site: { url: string; tokens: string[] }[], q: string): 
 /** Enrich up to `limit` unenriched items, stopping cleanly at `deadline`. Unfinished items wait for the next run. */
 export async function enrichItems(env: Env, limit = 200, deadline = Date.now() + 8 * 60000) {
   // The AI reads new posts on Sundays only; they wait in the queue until then
-  if (!isReadingDay() && env.MOCK !== "1") return { added: 0, seen: 0, note: WAITING_NOTE };
+  if (env.MOCK !== "1" && !(await readingAllowed(env))) return { added: 0, seen: 0, note: WAITING_NOTE };
   const rows = await env.DB.prepare(`SELECT id, source, url, community, query, COALESCE(title,'') AS title, COALESCE(text,'') AS text FROM items WHERE enriched=0 AND project=?1 ORDER BY collected_at LIMIT ?2`).bind(PROJECT.id, limit).all<any>();
   const items = rows.results || [];
   if (!items.length) return { added: 0, seen: 0, note: "nothing to enrich" };

@@ -35,7 +35,11 @@ The repo is connected to Cloudflare Workers Builds: every push to `main` deploys
 
 ## Weekly AI budget
 
-Workers AI is billed per neuron (about $0.011 per 1,000 above the account's 10,000 free a day), and reading every new post as it arrives cost about $1.50 a day. So the AI reads once a week, on Sundays (UTC), and stops at a weekly ceiling: `AI_WEEKLY_NEURONS` in `wrangler.toml` (150,000, about $1.50 a week). Reading may use 85% of it; the rest is kept for Monday's themes and moves. Weekly reading uses Llama 3.1 8B (about a sixth of the 70B's price per token), with the 70B only when the small model's answer is unusable; themes and moves keep GPT-OSS 120B. Posts left over after the ceiling are tagged by keyword rules. Every AI call, whatever triggered it, is logged by day and model in the `ai_usage` table (`src/ai-budget.ts`), so the ceiling holds and the spend is easy to check:
+Workers AI is billed per neuron (about $0.011 per 1,000 above the account's 10,000 free a day), and reading every new post as it arrives cost about $1.50 a day. So the AI reads once a week, on Sundays (UTC), and stops at a weekly ceiling: `AI_WEEKLY_NEURONS` in `wrangler.toml` (150,000, about $1.50 a week). Reading may use 85% of it; the rest is kept for Monday's themes and moves. Weekly reading uses Llama 3.1 8B (about a sixth of the 70B's price per token), with the 70B only when the small model's answer is unusable; themes and moves keep GPT-OSS 120B. Posts left over after the ceiling are tagged by keyword rules. To run the weekly reading now instead of waiting for Sunday, queue `read_now` (it reads until the queue is empty, within the same weekly budget, then rebuilds themes and moves):
+
+```sql
+INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('read_now', datetime('now'));
+``` Every AI call, whatever triggered it, is logged by day and model in the `ai_usage` table (`src/ai-budget.ts`), so the ceiling holds and the spend is easy to check:
 
 ```sql
 SELECT day, model, calls, ROUND(neurons) AS neurons FROM ai_usage ORDER BY day DESC;

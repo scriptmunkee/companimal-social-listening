@@ -3,7 +3,7 @@ import { PROJECT, TOPICS, REDDIT_INSIGHTS_PER_RUN, REDDIT_COMMENTS_TOP, REDDIT_C
 import { breedSlugOf, breedInText, breedName } from "./site";
 import { Env, nowIso, today, daysAgo, clean, inWaves } from "./lib";
 import { runAi, regionOf, heuristic, cleanIdea, sentenceCase, AI_STRONG_MODEL, AI_MODEL, AI_FALLBACK_MODEL, AI_READ_MODELS } from "./enrich";
-import { isReadingDay, readingBudgetLeft, WAITING_NOTE } from "./ai-budget";
+import { readingAllowed, readingBudgetLeft, WAITING_NOTE } from "./ai-budget";
 import { threadScore } from "./collectors/reddit";
 
 const KINDS = ["question", "advice_request", "vent", "story", "celebration", "debate", "recommendation_request", "myth", "news", "other", "irrelevant"];
@@ -83,7 +83,7 @@ ${batch.map((t) => JSON.stringify({
 /** Analyse threads that have no insight yet. Runs every 10 minutes; cheap when there's nothing new. */
 export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER_RUN, deadline = Date.now() + 4 * 60000) {
   // The AI reads new threads on Sundays only (busiest first); they wait in the queue until then
-  if (!isReadingDay() && env.MOCK !== "1") return { added: 0, seen: 0, note: WAITING_NOTE };
+  if (env.MOCK !== "1" && !(await readingAllowed(env))) return { added: 0, seen: 0, note: WAITING_NOTE };
   const rows = (await env.DB.prepare(`SELECT post_id, subreddit, url, title, snippet, body, flair, score, posts_count, COALESCE(insight_attempts,0) AS attempts FROM reddit_threads WHERE project=?1 AND insight_done=0
       AND NOT (source='api' AND comments_fetched_at IS NULL AND (posts_count IS NULL OR posts_count >= ?3) AND first_seen > ?4)
     ORDER BY COALESCE(posts_count,0) + COALESCE(score,0) DESC, last_seen DESC LIMIT ?2`).bind(PROJECT.id, limit, REDDIT_COMMENTS_MIN, new Date(Date.now() - 6 * 3600000).toISOString()).all<any>()).results || [];

@@ -189,6 +189,11 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0021_ai_usage",
     sql: [`CREATE TABLE IF NOT EXISTS ai_usage (day TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, neurons REAL NOT NULL DEFAULT 0, PRIMARY KEY (day, model))`],
   },
+  {
+    // First weekly reading straight away (17 Nov 2026), on the small model, rather than waiting for Sunday
+    name: "0022_read_now",
+    sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('read_now', datetime('now'))`],
+  },
 ];
 
 let checked = false;
