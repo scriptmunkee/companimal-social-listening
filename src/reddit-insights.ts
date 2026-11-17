@@ -3,6 +3,7 @@ import { PROJECT, TOPICS, REDDIT_INSIGHTS_PER_RUN, REDDIT_COMMENTS_TOP, REDDIT_C
 import { breedSlugOf, breedInText, breedName } from "./site";
 import { Env, nowIso, today, daysAgo, clean, inWaves } from "./lib";
 import { runAi, regionOf, heuristic, cleanIdea, sentenceCase, AI_STRONG_MODEL, AI_MODEL, AI_FALLBACK_MODEL } from "./enrich";
+import { isReadingDay, readingBudgetLeft, WAITING_NOTE } from "./ai-budget";
 import { threadScore } from "./collectors/reddit";
 
 const KINDS = ["question", "advice_request", "vent", "story", "celebration", "debate", "recommendation_request", "myth", "news", "other", "irrelevant"];
@@ -81,6 +82,8 @@ ${batch.map((t) => JSON.stringify({
 
 /** Analyse threads that have no insight yet. Runs every 10 minutes; cheap when there's nothing new. */
 export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER_RUN, deadline = Date.now() + 4 * 60000) {
+  // The AI reads new threads on Sundays only (busiest first); they wait in the queue until then
+  if (!isReadingDay() && env.MOCK !== "1") return { added: 0, seen: 0, note: WAITING_NOTE };
   const rows = (await env.DB.prepare(`SELECT post_id, subreddit, url, title, snippet, body, flair, score, posts_count, COALESCE(insight_attempts,0) AS attempts FROM reddit_threads WHERE project=?1 AND insight_done=0
       AND NOT (source='api' AND comments_fetched_at IS NULL AND (posts_count IS NULL OR posts_count >= ?3) AND first_seen > ?4)
     ORDER BY COALESCE(posts_count,0) + COALESCE(score,0) DESC, last_seen DESC LIMIT ?2`).bind(PROJECT.id, limit, REDDIT_COMMENTS_MIN, new Date(Date.now() - 6 * 3600000).toISOString()).all<any>()).results || [];
@@ -99,13 +102,16 @@ export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER
   for (const r of rows) r.replies = replies.get(r.post_id) || [];
   const out = new Map<string, any>();
   let model = "heuristic";
-  const aiOn = !!env.AI && env.MOCK !== "1";
+  // Once the week's AI budget is used, the rest of the week's threads are read by keyword rules
+  const aiOn = !!env.AI && env.MOCK !== "1" && await readingBudgetLeft(env);
   let answered = 0;
+  let budgetHit = false;
   if (aiOn) {
     const batches: any[][] = [];
     // Smaller batches when replies are included, to stay well inside the model's context
     for (let i = 0; i < rows.length; i += 8) batches.push(rows.slice(i, i + 8));
     await inWaves(batches, 4, deadline, async (batch) => {
+      if (budgetHit || !(await readingBudgetLeft(env))) { budgetHit = true; return; }
       try {
         const [arr, used] = await runAi(env, insightPrompt(batch), 4000);
         answered++;
@@ -116,7 +122,7 @@ export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER
   }
   // Nothing answered at all (AI outage or daily limit): leave every thread for the next run rather than
   // counting a failed attempt against it, so an outage never turns into rules-only readings
-  if (aiOn && !answered) return { added: 0, seen: rows.length, note: "ai=0 outage; nothing changed, retrying next run" };
+  if (aiOn && !answered) return { added: 0, seen: rows.length, note: budgetHit ? "weekly AI budget reached; rules from next run" : "ai=0 outage; nothing changed, retrying next run" };
   const validTopics = new Set(TOPICS.map((t) => t.id));
   const stmts: D1PreparedStatement[] = [];
   let ai = 0;
@@ -124,7 +130,7 @@ export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER
     const r = out.get(t.post_id);
     const ukSub = /^(askuk|casualuk|unitedkingdom|uk)$/i.test(t.subreddit || "");
     const ruleRegion = ukSub ? "uk" : regionOf(`${t.title} ${t.body || t.snippet || ""}`, t.url, `r/${t.subreddit}`, null);
-    if (!r && env.AI && env.MOCK !== "1" && t.attempts < 2) {
+    if (!r && aiOn && t.attempts < 2) {
       // AI skipped or failed on this one: try again next run (rules-based reading after 3 tries)
       stmts.push(env.DB.prepare(`UPDATE reddit_threads SET insight_attempts=COALESCE(insight_attempts,0)+1 WHERE post_id=?1`).bind(t.post_id));
       continue;
@@ -159,7 +165,9 @@ export async function analyseRedditThreads(env: Env, limit = REDDIT_INSIGHTS_PER
     stmts.push(env.DB.prepare(`UPDATE reddit_threads SET insight_done=1, insight_with_comments=?2 WHERE post_id=?1`).bind(t.post_id, t.replies.length ? 1 : 0));
   }
   for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));
-  return { added: rows.length, seen: rows.length, note: `ai=${ai}` };
+  // "rules only" must not read as an AI outage (health alerts on three ai=0 runs in a row)
+  const note = aiOn ? `ai=${ai}${budgetHit ? ", weekly AI budget reached" : ""}` : env.AI && env.MOCK !== "1" ? "rules only (weekly AI budget used)" : `ai=${ai}`;
+  return { added: rows.length, seen: rows.length, note };
 }
 
 /** Group the last 14 days of threads into conversation themes. Daily snapshot, kept for trend history. */

@@ -1,5 +1,6 @@
 import { TOPICS, PROJECT, UK_SIGNALS, NON_UK_SIGNALS, UK_FORUM_DOMAINS } from "../config/taxonomy";
 import { Env, nowIso, clean, inWaves } from "./lib";
+import { isReadingDay, readingBudgetLeft, neuronsFor, recordAiUsage, WAITING_NOTE } from "./ai-budget";
 
 export const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 // Used if the main model is retired or failing
@@ -58,6 +59,8 @@ export async function runAi(env: Env, prompt: string, maxTokens: number, tempera
         env.AI!.run(model as any, input as any),
         new Promise((_, reject) => setTimeout(() => reject(new Error(`${model} timed out`)), timeoutMs)),
       ]);
+      // Every answer is billed, usable or not: log it against the weekly budget
+      await recordAiUsage(env, model, neuronsFor(model, prompt, out));
       const arr = toArray(aiText(out));
       if (valid(arr)) return [arr, model];
       lastErr = new Error(`${model} returned an unusable answer`);
@@ -187,6 +190,8 @@ export function urlMatch(site: { url: string; tokens: string[] }[], q: string): 
 
 /** Enrich up to `limit` unenriched items, stopping cleanly at `deadline`. Unfinished items wait for the next run. */
 export async function enrichItems(env: Env, limit = 200, deadline = Date.now() + 8 * 60000) {
+  // The AI reads new posts on Sundays only; they wait in the queue until then
+  if (!isReadingDay() && env.MOCK !== "1") return { added: 0, seen: 0, note: WAITING_NOTE };
   const rows = await env.DB.prepare(`SELECT id, source, url, community, query, COALESCE(title,'') AS title, COALESCE(text,'') AS text FROM items WHERE enriched=0 AND project=?1 ORDER BY collected_at LIMIT ?2`).bind(PROJECT.id, limit).all<any>();
   const items = rows.results || [];
   if (!items.length) return { added: 0, seen: 0, note: "nothing to enrich" };
@@ -194,13 +199,16 @@ export async function enrichItems(env: Env, limit = 200, deadline = Date.now() +
   const results = new Map<string, any>();
   const forAi = items.filter((i) => (i.text || i.title).length >= 25);
   let aiUsed = 0;
-  const useAi = !!env.AI && env.MOCK !== "1";
+  // Once the week's AI budget is used, the rest of the week's posts are tagged by keyword rules
+  const useAi = !!env.AI && env.MOCK !== "1" && await readingBudgetLeft(env);
+  let budgetHit = false;
   // Items the AI looked at (or tried to). Anything not attempted before the deadline is left for next run.
   const attempted = new Set<string>();
   if (useAi) {
     const batches: any[][] = [];
     for (let i = 0; i < forAi.length; i += 15) batches.push(forAi.slice(i, i + 15));
     await inWaves(batches, 4, deadline, async (batch) => {
+      if (budgetHit || !(await readingBudgetLeft(env))) { budgetHit = true; return; }
       try {
         const [rows, model] = await runAi(env, buildPrompt(batch), 3000);
         for (const r of rows) if (r?.id && KINDS.includes(r.kind)) { results.set(r.id, { ...r, model }); aiUsed++; }
@@ -241,6 +249,9 @@ export async function enrichItems(env: Env, limit = 200, deadline = Date.now() +
     stmts.push(env.DB.prepare(`UPDATE items SET enriched=1 WHERE id=?1`).bind(it.id));
   }
   for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));
-  return { added: items.length - skipped, seen: items.length, note: `ai=${aiUsed}${skipped ? `, ${skipped} left for next run` : ""}` };
+  // "rules only" must not read as an AI outage (health alerts on three ai=0 runs in a row)
+  const note = useAi ? `ai=${aiUsed}${skipped ? `, ${skipped} left for next run` : ""}${budgetHit ? ", weekly AI budget reached" : ""}`
+    : env.AI && env.MOCK !== "1" ? "rules only (weekly AI budget used)" : `ai=${aiUsed}`;
+  return { added: items.length - skipped, seen: items.length, note };
 }
 

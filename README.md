@@ -13,8 +13,8 @@ Built to match the Beatrice Vasey tool (scriptmunkee/beatricevasey-social-listen
 | When | Job | What it does |
 |---|---|---|
 | 02:00 daily | `collect` | DataForSEO SERP tasks (forums daily; People Also Ask on Mondays), Reddit top of week and month plus every search (Serpent), YouTube, web mentions |
-| Every 10 minutes | `tick` | Picks up SERP results; Reddit feeds every 3 hours and comment threads; the AI reads new threads and posts |
-| 06:30 daily | `morning` | Rollups, Reddit themes, **moves**, health check. Mondays: re-read the site's pages and email the week's top five moves. 1st of the month: thin old comments |
+| Every 10 minutes | `tick` | Picks up SERP results; Reddit feeds every 3 hours and comment threads. **Sundays only:** the AI reads the week's new threads (busiest first) and posts, within the weekly AI budget |
+| 06:30 daily | `morning` | Rollups and health check. Mondays: Reddit themes and **moves** from Sunday's reading, re-read the site's pages and email the week's top five moves. 1st of the month: thin old comments |
 
 Storage:
 
@@ -33,6 +33,14 @@ The repo is connected to Cloudflare Workers Builds: every push to `main` deploys
 - Web mentions are limited to `.uk` sites and known UK forums.
 - YouTube reads recent uploads from named UK channels (`YOUTUBE_UK_CHANNELS` in `config/taxonomy.ts`); channel lookups are cached and listed on the Sources page.
 
+## Weekly AI budget
+
+Workers AI is billed per neuron (about $0.011 per 1,000 above the account's 10,000 free a day), and reading every new post as it arrives cost about $1.50 a day. So the AI reads once a week, on Sundays (UTC), and stops at a weekly ceiling: `AI_WEEKLY_NEURONS` in `wrangler.toml` (150,000, about $1.50 a week). Reading may use 85% of it; the rest is kept for Monday's themes and moves. Posts left over after the ceiling are tagged by keyword rules. Every AI call, whatever triggered it, is logged by day and model in the `ai_usage` table (`src/ai-budget.ts`), so the ceiling holds and the spend is easy to check:
+
+```sql
+SELECT day, model, calls, ROUND(neurons) AS neurons FROM ai_usage ORDER BY day DESC;
+```
+
 ## Health alerts and the Monday email
 
 Every morning a health check looks at the last 26 hours and emails `ALERT_EMAIL` from `alerts@companimal.co.uk` if anything is wrong: a job failed, didn't run or collected nothing; the AI stopped answering three runs in a row; a UK YouTube channel can't be found; the Serpent key is missing or rejected; Serpent spend passed $0.50 in a day; or the site's sitemap was blocked (the alert names the fix). Silent when healthy. `GET /api/health` returns the current issues.
@@ -41,7 +49,7 @@ Every Monday at 06:30 the week's top five open moves are emailed to the same add
 
 ## Moves (the insight layer)
 
-`src/insights.ts` rebuilds the moves every morning from the last 14 days, reading across every channel: Reddit themes and per-thread readings, question clusters from YouTube, People Also Ask, forums and the web, and myths from both.
+`src/insights.ts` rebuilds the moves every Monday morning from the last 14 days, reading across every channel: Reddit themes and per-thread readings, question clusters from YouTube, People Also Ask, forums and the web, and myths from both.
 
 | Type | Trigger | Action |
 |---|---|---|
@@ -62,7 +70,7 @@ Priority: engagement and growth of the evidence, discounted by age; more for peo
 
 ## Richer reading per thread
 
-The AI reads every Reddit thread with its post body and six most upvoted replies, and records: kind, theme, pain point, need, emotion, content angle, audience, topic, region, what the replies say, **breed** (mapped to its `/breeds/` page), **intent** (buy, sell, stud, rehome, adopt, own, learn, share), **urgency** (now, soon, planning), **UK region**, the question as a search query, and whether the replies disagree. People explicitly asking for a guide are flagged by wording. An AI outage leaves threads unread for the next run rather than falling back to keyword rules.
+The AI reads every Reddit thread with its post body and six most upvoted replies, and records: kind, theme, pain point, need, emotion, content angle, audience, topic, region, what the replies say, **breed** (mapped to its `/breeds/` page), **intent** (buy, sell, stud, rehome, adopt, own, learn, share), **urgency** (now, soon, planning), **UK region**, the question as a search query, and whether the replies disagree. People explicitly asking for a guide are flagged by wording. An AI outage leaves threads unread for the next run rather than falling back to keyword rules. Once the week's AI budget is used, the rest of that Sunday's threads are read by keyword rules.
 
 ## Reddit
 

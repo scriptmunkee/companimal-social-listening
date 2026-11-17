@@ -15,6 +15,7 @@ export interface Env {
   ALERTS?: SendEmail;
   ALERT_EMAIL?: string; // must be a verified Email Routing destination
   MOCK?: string; // "1" = generate fixture data instead of calling APIs (local testing)
+  AI_WEEKLY_NEURONS?: string; // Workers AI ceiling per week (Sunday to Saturday, UTC); see src/ai-budget.ts
 }
 
 export interface Item {

@@ -184,6 +184,11 @@ const MIGRATIONS: { name: string; sql: string[] }[] = [
     name: "0020_moves_rebuild",
     sql: [`INSERT OR IGNORE INTO pending_jobs (job, created_at) VALUES ('insights_now', datetime('now'))`],
   },
+  {
+    // Every Workers AI call, logged for the weekly budget (src/ai-budget.ts)
+    name: "0021_ai_usage",
+    sql: [`CREATE TABLE IF NOT EXISTS ai_usage (day TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, neurons REAL NOT NULL DEFAULT 0, PRIMARY KEY (day, model))`],
+  },
 ];
 
 let checked = false;

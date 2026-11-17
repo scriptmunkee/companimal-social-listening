@@ -15,6 +15,7 @@ import { renderPage, notFoundPage } from "./dashboard/views";
 import { questionDetail, topicDetail, seasonality, mythGroups } from "./dashboard/data";
 import { ensureSchema } from "./migrations";
 import { healthJob, checkHealth, weeklyDigest } from "./health";
+import { isSynthesisDay } from "./ai-budget";
 
 const dashboardUrl = (env: Env, fallback = "") => (env.DASHBOARD_URL || fallback).replace(/\/$/, "");
 
@@ -29,7 +30,7 @@ async function dailyCollect(env: Env) {
   await runJob(env, "content_analysis", () => collectContentAnalysis(env));
 }
 
-/** Every 10 minutes: pick up finished SERP tasks, enrich new items, read new Reddit threads. */
+/** Every 10 minutes: pick up finished SERP tasks and Reddit threads. The AI reads them on Sundays (src/ai-budget.ts). */
 async function hourly(env: Env) {
   // Skip if the previous run is still going, so rows are never processed twice
   // The lock outlives the longest possible run (cron runs are capped at 15 minutes)
@@ -115,13 +116,17 @@ async function runPending(env: Env) {
   }
 }
 
-/** 06:30 daily: rollups, themes, moves and health. Site pages and the weekly email on Mondays. */
+/** 06:30 daily: rollups and health. Mondays: themes and moves from Sunday's AI reading, site pages and the weekly email. */
 async function morning(env: Env) {
   const d = new Date();
   if (d.getUTCDay() === 1) await runJob(env, "site", () => refreshSitePages(env));
   await runJob(env, "rollup", () => rollup(env, 3));
-  await runJob(env, "reddit_themes", () => buildRedditThemes(env));
-  await runJob(env, "insights", () => buildInsights(env));
+  // Themes and moves only change after Sunday's reading, so they're rebuilt once a week (the runs are
+  // still logged daily, so the health check sees them)
+  type Job = { added: number; seen: number; cost?: number; note?: string };
+  const weekly = (fn: () => Promise<Job>): Promise<Job> => isSynthesisDay(d) ? fn() : Promise.resolve({ added: 0, seen: 0, note: "weekly: rebuilt on Mondays" });
+  await runJob(env, "reddit_themes", () => weekly(() => buildRedditThemes(env)));
+  await runJob(env, "insights", () => weekly(() => buildInsights(env)));
   await runJob(env, "health", () => healthJob(env));
   if (d.getUTCDay() === 1) await runJob(env, "digest", () => weeklyDigest(env, dashboardUrl(env)));
   if (d.getUTCDate() === 1) await runJob(env, "reddit_prune", () => pruneReddit(env));
